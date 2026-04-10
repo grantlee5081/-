@@ -540,10 +540,11 @@ def run_full_pipeline(
     _stat.text("🧬  Step 2/4  遺傳演算法優化（約 30~90 秒）...")
     _prog.progress(25)
 
-    ga = GeneticAlgorithm(
-        **ga_config,
-        mode='short_term' if short_term_mode else 'long_term',
-    )
+    ga_mode = 'short_term' if short_term_mode else 'long_term'
+    # 從 ga_config 中移除可能衝突的 mode 鍵（防禦性處理）
+    _clean_cfg = {k: v for k, v in ga_config.items()
+                  if k in ('population_size', 'generations', 'crossover_rate', 'mutation_rate')}
+    ga = GeneticAlgorithm(**_clean_cfg, mode=ga_mode)
     pool_data = {c: stock_data[c] for c in target_pool if c in stock_data}
     if not pool_data:
         raise RuntimeError("目標股池無有效數據。")

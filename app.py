@@ -101,19 +101,23 @@ def fetch_realtime_quotes(codes: tuple[str, ...]) -> dict[str, dict]:
     for code in codes:
         for suffix in ('.TW', '.TWO'):
             try:
+                # auto_adjust=False：使用未還原除權息的原始收盤價，
+                # 與看盤軟體顯示一致（不受股利調整影響）
                 raw = yf.download(
                     f"{code}{suffix}", period='5d', interval='1d',
-                    progress=False, auto_adjust=True,
+                    progress=False, auto_adjust=False,
                 )
                 if raw.empty:
                     continue
                 if isinstance(raw.columns, pd.MultiIndex):
                     raw.columns = [c[0] for c in raw.columns]
-                raw = raw.dropna(subset=['Close']).sort_index()
+                # 優先使用原始 Close（未調整）
+                close_col = 'Close'
+                raw = raw.dropna(subset=[close_col]).sort_index()
                 if len(raw) < 1:
                     continue
-                curr  = float(raw['Close'].iloc[-1])
-                prev  = float(raw['Close'].iloc[-2]) if len(raw) >= 2 else curr
+                curr  = float(raw[close_col].iloc[-1])
+                prev  = float(raw[close_col].iloc[-2]) if len(raw) >= 2 else curr
                 chg   = curr - prev
                 chg_p = chg / prev if prev != 0 else 0.0
                 quotes[code] = {
@@ -136,7 +140,7 @@ def fetch_kline_data(code: str) -> pd.DataFrame | None:
         try:
             raw = yf.download(
                 f"{code}{suffix}", period='3mo', interval='1d',
-                progress=False, auto_adjust=True,
+                progress=False, auto_adjust=False,
             )
             if raw.empty:
                 continue

@@ -98,10 +98,30 @@ class ThinkingLogger:
         self._render()
 
     def _render(self) -> None:
-        html = '<br>'.join(
-            f'<span style="color:#7ec8e3;">{l}</span>'
-            for l in self._lines
-        )
+        # 使用 Morandi 色系：accent 藍灰顯示 log 文字，在淺色 think-box 上清晰可讀
+        _COLORS = {
+            'data':    '#607D8B',   # 霧藍
+            'ga':      '#7A6E9E',   # 柔紫
+            'mc':      '#5A8A7A',   # 消綠
+            'holding': '#B8966A',   # 琥珀
+            'kdj':     '#6B7C8D',   # 鐵藍
+            'volume':  '#7A9E87',   # 鼠尾草
+            'signal':  '#607D8B',   # 霧藍
+            'done':    '#5A8A7A',   # 消綠
+            'warn':    '#B85450',   # 消紅
+            'info':    '#8A8A8A',   # 中性灰
+        }
+        html_parts = []
+        for line in self._lines:
+            # 根據 line 前綴 icon 猜測 kind → 對應顏色
+            color = '#7A7A7A'   # fallback muted
+            for k, v in _COLORS.items():
+                icon = ThinkingLogger._ICONS.get(k, '')
+                if icon and line.startswith(icon):
+                    color = v
+                    break
+            html_parts.append(f'<span style="color:{color};">{line}</span>')
+        html = '<br>'.join(html_parts)
         self._container.markdown(
             f'<div class="think-box">{html}</div>',
             unsafe_allow_html=True,

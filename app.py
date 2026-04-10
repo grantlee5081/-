@@ -6,7 +6,7 @@ app.py  ─  v4.0  實戰交易儀表板（UI 層）
   engine.py → 業務邏輯（Pipeline、決策引擎、ThinkingLogger）
   auth.py   → 用戶認證（登入/註冊/設定持久化）
 
-台股配色：漲 = 紅 #e84545   跌 = 綠 #26a69a
+台股配色（Morandi）：漲 = 消紅 #B85450   跌 = 消綠 #5A8A7A
 """
 
 # ── 標準函式庫 ────────────────────────────────────────────────
@@ -48,44 +48,324 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-.stApp { background-color: #0a0e1a; }
+/* ══════════════════════════════════════════════════════════════
+   Morandi × 日系文青  ─  Design System v4.0
+   Palette:
+     Linen BG  #F9F6F1  |  Surface #FFFFFF
+     Accent    #607D8B  |  Sage    #7A9E87
+     Text      #383838  |  Muted   #7A7A7A
+     Border    #E6E1D9  |  Rise    #B85450  Fall #5A8A7A
+══════════════════════════════════════════════════════════════ */
 
+/* ─ Google Fonts ─────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@300;400;600&family=Noto+Sans+TC:wght@300;400;500&family=Inter:wght@300;400;500&display=swap');
+
+/* ─ Root ─────────────────────────────────────────────────── */
+:root {
+    --bg      : #F9F6F1;
+    --surface : #FFFFFF;
+    --sidebar : #F2EFE8;
+    --accent  : #607D8B;
+    --sage    : #7A9E87;
+    --amber   : #B8966A;
+    --text    : #383838;
+    --muted   : #7A7A7A;
+    --faint   : #AEAEAE;
+    --border  : #E6E1D9;
+    --shadow  : rgba(56,40,20,.07);
+    --rise    : #B85450;
+    --fall    : #5A8A7A;
+}
+
+/* ─ Global ───────────────────────────────────────────────── */
+.stApp {
+    background-color: var(--bg) !important;
+    font-family: 'Noto Sans TC', 'Inter', sans-serif;
+    color: var(--text);
+}
+
+/* ─ Sidebar ──────────────────────────────────────────────── */
+[data-testid="stSidebar"] {
+    background-color: var(--sidebar) !important;
+    border-right: 1px solid var(--border) !important;
+}
+[data-testid="stSidebar"] .stMarkdown,
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] span {
+    color: var(--text) !important;
+}
+[data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3,
+[data-testid="stSidebar"] h4 {
+    font-family: 'Noto Serif TC', Georgia, serif !important;
+    color: var(--text) !important;
+}
+
+/* ─ Typography ───────────────────────────────────────────── */
+h1, h2, h3 {
+    font-family: 'Noto Serif TC', Georgia, serif !important;
+    color: var(--text) !important;
+    font-weight: 600 !important;
+    letter-spacing: -0.01em;
+}
+h4, h5, h6, p {
+    font-family: 'Noto Sans TC', 'Inter', sans-serif !important;
+    color: var(--text) !important;
+}
+
+/* ─ Buttons ──────────────────────────────────────────────── */
+[data-testid="stButton"] > button {
+    background: transparent !important;
+    border: 1.5px solid var(--border) !important;
+    border-radius: 24px !important;
+    color: var(--muted) !important;
+    font-family: 'Noto Sans TC', 'Inter', sans-serif !important;
+    font-size: .83rem !important;
+    letter-spacing: .04em;
+    padding: 7px 20px !important;
+    transition: all .2s ease !important;
+    box-shadow: none !important;
+}
+[data-testid="stButton"] > button:hover {
+    border-color: var(--accent) !important;
+    color: var(--accent) !important;
+    background: rgba(96,125,139,.06) !important;
+}
+/* Primary variant */
+[data-testid="stButton"] > button[kind="primary"] {
+    background: var(--accent) !important;
+    border-color: var(--accent) !important;
+    color: #fff !important;
+    font-weight: 500 !important;
+}
+[data-testid="stButton"] > button[kind="primary"]:hover {
+    background: #506879 !important;
+    border-color: #506879 !important;
+}
+
+/* ─ Metric Cards ─────────────────────────────────────────── */
+div[data-testid="metric-container"] {
+    background: var(--surface) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 14px !important;
+    padding: 18px 20px !important;
+    box-shadow: 0 2px 14px var(--shadow) !important;
+    transition: box-shadow .2s ease !important;
+}
+div[data-testid="metric-container"]:hover {
+    box-shadow: 0 6px 24px rgba(56,40,20,.11) !important;
+}
+[data-testid="metric-label"] > div {
+    color: var(--muted) !important;
+    font-size: .74rem !important;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+    font-family: 'Noto Sans TC', 'Inter', sans-serif !important;
+}
+[data-testid="metric-value"] > div {
+    color: var(--text) !important;
+    font-family: 'Noto Serif TC', Georgia, serif !important;
+    font-size: 1.5rem !important;
+    font-weight: 600 !important;
+}
+[data-testid="metric-delta"] {
+    font-size: .76rem !important;
+}
+
+/* ─ Tabs ─────────────────────────────────────────────────── */
+.stTabs [data-baseweb="tab-list"] {
+    background: transparent !important;
+    border-bottom: 1px solid var(--border) !important;
+    gap: 4px;
+}
+.stTabs [data-baseweb="tab"] {
+    background: transparent !important;
+    border-radius: 8px 8px 0 0 !important;
+    border: none !important;
+    border-bottom: 2px solid transparent !important;
+    color: var(--muted) !important;
+    font-family: 'Noto Sans TC', 'Inter', sans-serif !important;
+    font-size: .84rem !important;
+    padding: 8px 18px !important;
+    transition: all .18s ease !important;
+}
+.stTabs [aria-selected="true"] {
+    color: var(--accent) !important;
+    border-bottom: 2px solid var(--accent) !important;
+    background: rgba(96,125,139,.05) !important;
+}
+
+/* ─ Expanders ────────────────────────────────────────────── */
+[data-testid="stExpander"] {
+    border: 1px solid var(--border) !important;
+    border-radius: 12px !important;
+    background: var(--surface) !important;
+    box-shadow: 0 1px 8px var(--shadow) !important;
+    margin: 8px 0 !important;
+    overflow: hidden;
+}
+[data-testid="stExpander"] summary {
+    color: var(--text) !important;
+    font-family: 'Noto Sans TC', 'Inter', sans-serif !important;
+    font-size: .86rem !important;
+    padding: 12px 16px !important;
+}
+[data-testid="stExpander"] summary:hover {
+    background: rgba(96,125,139,.04) !important;
+}
+
+/* ─ Inputs ───────────────────────────────────────────────── */
+.stTextInput > div > div > input,
+.stNumberInput > div > div > input,
+.stTextArea > div > div > textarea {
+    background: var(--surface) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 10px !important;
+    color: var(--text) !important;
+    font-family: 'Noto Sans TC', 'Inter', sans-serif !important;
+    font-size: .88rem !important;
+}
+.stTextInput > div > div > input:focus,
+.stNumberInput > div > div > input:focus,
+.stTextArea > div > div > textarea:focus {
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 3px rgba(96,125,139,.14) !important;
+}
+
+/* ─ Select / Radio ───────────────────────────────────────── */
+[data-testid="stSelectbox"] > div > div {
+    background: var(--surface) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 10px !important;
+    color: var(--text) !important;
+}
+.stRadio label { color: var(--text) !important; font-size: .85rem !important; }
+.stRadio label span { color: var(--muted) !important; }
+
+/* ─ Toggle ───────────────────────────────────────────────── */
+.stToggle label { color: var(--text) !important; }
+
+/* ─ Slider ───────────────────────────────────────────────── */
+.stSlider [data-testid="stTickBar"] { color: var(--faint) !important; }
+
+/* ─ Caption / Code ───────────────────────────────────────── */
+[data-testid="stCaptionContainer"] p,
+.stCaption { color: var(--muted) !important; font-size: .77rem !important; }
+code {
+    background: rgba(96,125,139,.10) !important;
+    color: var(--accent) !important;
+    border-radius: 6px !important;
+    padding: 2px 7px !important;
+    font-size: .81rem !important;
+}
+
+/* ─ Alerts / Info boxes ─────────────────────────────────── */
+[data-testid="stAlert"] {
+    border-radius: 10px !important;
+    border: 1px solid var(--border) !important;
+}
+
+/* ─ Divider ──────────────────────────────────────────────── */
+hr { border: none !important; border-top: 1px solid var(--border) !important; margin: 20px 0 !important; }
+
+/* ─ DataFrames ───────────────────────────────────────────── */
+[data-testid="stDataFrame"] {
+    border: 1px solid var(--border) !important;
+    border-radius: 12px !important;
+    overflow: hidden !important;
+}
+
+/* ─ Progress Bar ─────────────────────────────────────────── */
+[data-testid="stProgress"] > div { background: var(--border) !important; border-radius: 8px !important; }
+[data-testid="stProgress"] > div > div { background: var(--accent) !important; border-radius: 8px !important; }
+
+/* ═══════════════════════════════════════════════════════════
+   Custom Component Styles
+═══════════════════════════════════════════════════════════ */
+
+/* ─ KPI Cards ────────────────────────────────────────────── */
 .kpi-wrap {
-    background: linear-gradient(135deg,#131929,#1a2035);
-    border:1px solid rgba(76,155,232,.20);
-    border-radius:12px; padding:16px 20px 12px;
-    text-align:center; position:relative; overflow:hidden;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 22px 24px 16px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 2px 16px var(--shadow);
+    transition: box-shadow .22s ease, transform .22s ease;
+}
+.kpi-wrap:hover {
+    box-shadow: 0 8px 28px rgba(56,40,20,.10);
+    transform: translateY(-2px);
 }
 .kpi-wrap::before {
-    content:''; position:absolute; top:0; left:0; right:0; height:2px;
-    background:linear-gradient(90deg,#4c9be8,#7c4dff);
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; height: 3px;
+    background: linear-gradient(90deg, var(--accent) 0%, var(--sage) 100%);
+    border-radius: 16px 16px 0 0;
 }
-.kpi-lbl { font-size:.75rem; color:#6b7fa8; letter-spacing:.08em; margin-bottom:4px; }
-.kpi-val { font-size:1.5rem; font-weight:700; color:#e0e8f8; line-height:1.2; }
-.kpi-dlt { font-size:.80rem; margin-top:4px; }
-.tw-red  { color:#e84545; }  .tw-green { color:#26a69a; }  .tw-gray { color:#6b7fa8; }
+.kpi-lbl {
+    font-size: .70rem;
+    font-family: 'Noto Sans TC', 'Inter', sans-serif;
+    color: var(--muted);
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+}
+.kpi-val {
+    font-size: 1.55rem;
+    font-family: 'Noto Serif TC', Georgia, serif;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.2;
+}
+.kpi-dlt {
+    font-size: .76rem;
+    font-family: 'Noto Sans TC', 'Inter', sans-serif;
+    margin-top: 8px;
+    opacity: .85;
+}
 
+/* ─ Section Headers ──────────────────────────────────────── */
 .section-bar {
-    font-size:.76rem; font-weight:600; color:#4c9be8;
-    letter-spacing:.12em; text-transform:uppercase;
-    display:flex; align-items:center; gap:8px; margin:0 0 10px;
+    font-size: .68rem;
+    font-family: 'Noto Sans TC', 'Inter', sans-serif;
+    font-weight: 600;
+    color: var(--faint);
+    letter-spacing: .20em;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 28px 0 14px;
 }
 .section-bar::after {
-    content:''; flex:1; height:1px;
-    background:linear-gradient(90deg,rgba(76,155,232,.35),transparent);
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
 }
 
-div[data-testid="metric-container"] {
-    background:#131929; border:1px solid rgba(76,155,232,.18);
-    border-radius:10px; padding:12px 16px;
-}
-
+/* ─ Thinking Log ─────────────────────────────────────────── */
 .think-box {
-    background:#0d1117; border:1px solid rgba(76,155,232,.25);
-    border-radius:8px; padding:12px 16px;
-    font-family:'Courier New',monospace; font-size:.82rem;
-    color:#7ec8e3; max-height:220px; overflow-y:auto; line-height:1.7;
+    background: #F5F2EC;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 10px 10px 0;
+    padding: 14px 18px;
+    font-family: 'SF Mono', 'Courier New', monospace;
+    font-size: .79rem;
+    color: var(--muted);
+    max-height: 220px;
+    overflow-y: auto;
+    line-height: 1.85;
 }
+.think-box::-webkit-scrollbar { width: 3px; }
+.think-box::-webkit-scrollbar-track { background: transparent; }
+.think-box::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -176,8 +456,8 @@ def render_auth_page() -> bool:
     st.markdown("""
     <div style="text-align:center;padding:30px 0 10px;">
       <div style="font-size:2.8rem;">📈</div>
-      <h2 style="color:#e0e8f8;margin:8px 0 4px;">台股量化交易儀表板</h2>
-      <p style="color:#6b7fa8;font-size:.85rem;">請先登入或建立帳號</p>
+      <h2 style="color:var(--text,#383838);margin:8px 0 4px;font-family:'Noto Serif TC',Georgia,serif;">台股量化交易儀表板</h2>
+      <p style="color:var(--muted,#7A7A7A);font-size:.85rem;">請先登入或建立帳號</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -222,7 +502,7 @@ def render_sidebar(username: str) -> dict:
         # 用戶資訊列
         col_u, col_out = st.columns([3, 1])
         col_u.markdown(
-            f"<div style='color:#4c9be8;font-size:.85rem;font-weight:600;'>"
+            f"<div style='color:var(--accent,#607D8B);font-size:.85rem;font-weight:600;'>"
             f"👤  {username}</div>", unsafe_allow_html=True,
         )
         if col_out.button("登出", key="btn_logout"):
@@ -368,9 +648,10 @@ def render_sidebar(username: str) -> dict:
 # ═══════════════════════════════════════════════════════════════
 
 def _tw_color_hex(val: float) -> str:
-    if val > 0: return '#e84545'
-    if val < 0: return '#26a69a'
-    return '#6b7fa8'
+    """台股漲跌配色（Morandi 低飽和版）。"""
+    if val > 0: return '#B85450'   # 消紅 ─ 漲
+    if val < 0: return '#5A8A7A'   # 消綠 ─ 跌
+    return '#9E9E9E'               # 中性灰
 
 
 def _arrow(val: float) -> str:
@@ -380,136 +661,175 @@ def _arrow(val: float) -> str:
 
 
 def chart_kline(df: pd.DataFrame, code: str) -> go.Figure:
-    """台股 K 線圖（60日）+ MA5/20/60 + 成交量副圖。"""
+    """台股 K 線圖（60日）+ MA5/20/60 + 成交量副圖（Morandi 淺色主題）。"""
     df = df.tail(60).copy()
     for p, c in [(5, 'MA5'), (20, 'MA20'), (60, 'MA60')]:
         df[c] = df['Close'].rolling(p).mean()
-    vol_colors = ['#e84545' if c >= o else '#26a69a'
+    # Morandi 低飽和漲跌色
+    vol_colors = ['#C97870' if c >= o else '#6B9E8E'
                   for c, o in zip(df['Close'], df['Open'])]
+
+    _bg   = 'rgba(0,0,0,0)'         # 透明背景（讓 CSS linen 底色顯示）
+    _plot = '#FDFBF7'               # 圖表繪圖區淺底
+    _grid = 'rgba(0,0,0,0.05)'     # 淺灰格線
+    _font = '#4A4A4A'              # 深灰字
 
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
                         row_heights=[0.75, 0.25], vertical_spacing=0.025)
     fig.add_trace(go.Candlestick(
         x=df.index, open=df['Open'], high=df['High'],
         low=df['Low'], close=df['Close'],
-        increasing_line_color='#e84545', increasing_fillcolor='#e84545',
-        decreasing_line_color='#26a69a', decreasing_fillcolor='#26a69a',
+        increasing_line_color='#B85450', increasing_fillcolor='#C97870',
+        decreasing_line_color='#5A8A7A', decreasing_fillcolor='#6B9E8E',
         line_width=1, name='K線', showlegend=False,
     ), row=1, col=1)
-    for col_n, color, name in [('MA5','#ffd700','MA5'),('MA20','#4c9be8','MA20'),('MA60','#ff8c00','MA60')]:
+    for col_n, color, name in [
+        ('MA5',  '#B8966A', 'MA5'),    # 琥珀
+        ('MA20', '#607D8B', 'MA20'),   # 霧藍
+        ('MA60', '#7A9E87', 'MA60'),   # 鼠尾草綠
+    ]:
         fig.add_trace(go.Scatter(x=df.index, y=df[col_n], mode='lines',
                                   line=dict(color=color, width=1.4), name=name), row=1, col=1)
     fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=vol_colors,
-                          marker_line_width=0, name='成交量', showlegend=False, opacity=0.85),
+                          marker_line_width=0, name='成交量', showlegend=False, opacity=0.75),
                   row=2, col=1)
     fig.add_hline(y=float(df['Close'].iloc[-1]), row=1, col=1,
-                  line_dash='dot', line_color='rgba(255,255,255,0.22)', line_width=1)
-    _d = 'rgba(14,17,23,1)'
+                  line_dash='dot', line_color='rgba(96,125,139,0.35)', line_width=1)
     fig.update_layout(
-        title=dict(text=f'<b>{code}</b>　近 60 日 K 線', font=dict(size=14, color='#e0e8f8')),
+        title=dict(text=f'<b>{code}</b>　近 60 日 K 線',
+                   font=dict(size=14, color=_font, family='Noto Serif TC, Georgia, serif')),
         xaxis_rangeslider_visible=False,
-        plot_bgcolor=_d, paper_bgcolor='rgba(14,17,23,0)',
-        font=dict(color='#c8d4e8', size=11), height=500,
+        plot_bgcolor=_plot, paper_bgcolor=_bg,
+        font=dict(color=_font, size=11), height=500,
         margin=dict(l=60, r=40, t=50, b=30),
-        legend=dict(orientation='h', y=1.01, x=0, bgcolor='rgba(0,0,0,0)', font=dict(size=11)),
+        legend=dict(orientation='h', y=1.01, x=0, bgcolor='rgba(255,255,255,0)',
+                    font=dict(size=11, color=_font)),
         hovermode='x unified',
-        yaxis=dict(title='股價 (NT$)', gridcolor='rgba(255,255,255,0.06)', tickformat=',.1f', side='right'),
-        yaxis2=dict(title='成交量', gridcolor='rgba(255,255,255,0.06)', tickformat='.2s', side='right'),
+        yaxis=dict(title='股價 (NT$)', gridcolor=_grid, tickformat=',.1f', side='right',
+                   color=_font, linecolor='rgba(0,0,0,0.08)'),
+        yaxis2=dict(title='成交量', gridcolor=_grid, tickformat='.2s', side='right',
+                    color=_font),
     )
-    fig.update_xaxes(gridcolor='rgba(255,255,255,0.06)')
+    fig.update_xaxes(gridcolor=_grid, color=_font, linecolor='rgba(0,0,0,0.08)')
     return fig
 
 
 def chart_monte_carlo(mc: dict, cash: float) -> go.Figure:
+    """蒙地卡羅路徑圖（Morandi 淺色主題）。"""
     paths = mc['paths']
     n, init, bk_y = mc['simulation_days'], mc['initial_portfolio_value'], cash * 0.30
     x = np.arange(n + 1)
     p05, p25, p50, p75, p95 = [np.percentile(paths, p, axis=0) for p in (5,25,50,75,95)]
 
+    _bg   = 'rgba(0,0,0,0)'
+    _plot = '#FDFBF7'
+    _grid = 'rgba(0,0,0,0.05)'
+    _font = '#4A4A4A'
+
     fig = go.Figure()
-    fig.add_hrect(y0=0, y1=bk_y, fillcolor='rgba(220,50,50,0.10)', line_width=0, layer='below',
+    fig.add_hrect(y0=0, y1=bk_y, fillcolor='rgba(184,84,80,0.07)', line_width=0, layer='below',
                   annotation_text="  破產風險區", annotation_position="bottom right",
-                  annotation_font=dict(color='rgba(255,100,100,0.5)', size=10))
+                  annotation_font=dict(color='rgba(184,84,80,0.55)', size=10))
     rng = np.random.default_rng(42)
     for ix in rng.choice(len(paths), min(150, len(paths)), replace=False):
         fig.add_trace(go.Scatter(x=x, y=paths[ix], mode='lines',
-                                  line=dict(color='rgba(130,170,230,0.06)', width=0.7),
+                                  line=dict(color='rgba(96,125,139,0.06)', width=0.7),
                                   showlegend=False, hoverinfo='skip'))
     for y_band, fill_color, name in [
-        (np.concatenate([p95, p05[::-1]]), 'rgba(76,155,232,0.10)', '90%信心帶'),
-        (np.concatenate([p75, p25[::-1]]), 'rgba(76,155,232,0.25)', 'IQR帶'),
+        (np.concatenate([p95, p05[::-1]]), 'rgba(96,125,139,0.08)', '90%信心帶'),
+        (np.concatenate([p75, p25[::-1]]), 'rgba(96,125,139,0.20)', 'IQR帶'),
     ]:
         fig.add_trace(go.Scatter(x=np.concatenate([x, x[::-1]]), y=y_band,
                                   fill='toself', fillcolor=fill_color,
                                   line=dict(color='rgba(0,0,0,0)'), name=name, hoverinfo='skip'))
     for y_line, color, dash, name in [
-        (p50, '#4c9be8', 'solid', '中位數'),
-        (p05, 'rgba(232,69,69,.8)', 'dot', '5th'),
-        (p95, 'rgba(38,166,154,.8)', 'dot', '95th'),
+        (p50, '#607D8B', 'solid', '中位數'),
+        (p05, 'rgba(184,84,80,.85)', 'dot', '5th'),
+        (p95, 'rgba(90,138,122,.85)', 'dot', '95th'),
     ]:
         fig.add_trace(go.Scatter(x=x, y=y_line, mode='lines',
                                   line=dict(color=color, width=2 if dash=='solid' else 1.5, dash=dash),
                                   name=name))
-    for y_val, dash, color, label, pos in [
-        (init, 'dash', 'rgba(255,255,255,.35)', f'初始投入 NT${init:,.0f}', 'top left'),
-        (bk_y, 'solid', 'rgba(232,69,69,.75)', f'破產門檻 NT${bk_y:,.0f}', 'bottom left'),
+    for y_val, dash, color, ann_color, label, pos in [
+        (init, 'dash', 'rgba(96,125,139,.40)', '#607D8B', f'初始投入 NT${init:,.0f}', 'top left'),
+        (bk_y, 'solid', 'rgba(184,84,80,.60)', '#B85450', f'破產門檻 NT${bk_y:,.0f}', 'bottom left'),
     ]:
         fig.add_hline(y=y_val, line_dash=dash, line_color=color,
                       annotation_text=label, annotation_position=pos,
-                      annotation_font=dict(color=color, size=10))
-    _d = 'rgba(14,17,23,1)'
+                      annotation_font=dict(color=ann_color, size=10))
     fig.update_layout(
-        title=f"蒙地卡羅  {mc['n_simulations']:,} 路徑 × {n} 交易日",
-        xaxis=dict(title='交易日', gridcolor='rgba(255,255,255,.06)'),
-        yaxis=dict(title='投組市值 (NT$)', tickformat=',.0f', gridcolor='rgba(255,255,255,.06)'),
-        plot_bgcolor=_d, paper_bgcolor='rgba(14,17,23,0)', font=dict(color='white'),
-        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1, bgcolor='rgba(0,0,0,0)'),
+        title=dict(text=f"蒙地卡羅  {mc['n_simulations']:,} 路徑 × {n} 交易日",
+                   font=dict(color=_font)),
+        xaxis=dict(title='交易日', gridcolor=_grid, color=_font),
+        yaxis=dict(title='投組市值 (NT$)', tickformat=',.0f', gridcolor=_grid, color=_font),
+        plot_bgcolor=_plot, paper_bgcolor=_bg, font=dict(color=_font),
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1,
+                    bgcolor='rgba(255,255,255,0)', font=dict(color=_font)),
         hovermode='x unified', height=480, margin=dict(t=65),
     )
     return fig
 
 
 def chart_return_dist(mc: dict) -> go.Figure:
+    """報酬率分佈直方圖（Morandi 淺色主題）。"""
     paths = mc['paths']
     init  = mc['initial_portfolio_value']
     rets  = (paths[:, -1] - init) / init * 100
-    _d = 'rgba(14,17,23,1)'
+
+    _bg   = 'rgba(0,0,0,0)'
+    _plot = '#FDFBF7'
+    _grid = 'rgba(0,0,0,0.05)'
+    _font = '#4A4A4A'
+
     fig = go.Figure()
-    for mask, color, name in [(rets < 0, 'rgba(232,69,69,.65)', '虧損路徑'),
-                               (rets >= 0, 'rgba(38,166,154,.65)', '獲利路徑')]:
+    for mask, color, name in [
+        (rets < 0,  'rgba(184,84,80,.55)',  '虧損路徑'),
+        (rets >= 0, 'rgba(90,138,122,.55)', '獲利路徑'),
+    ]:
         fig.add_trace(go.Histogram(x=rets[mask], nbinsx=40, marker_color=color, name=name))
-    for pct, col in [(5,'#e84545'),(50,'white'),(95,'#26a69a')]:
+    for pct, col in [(5,'#B85450'),(50,'#607D8B'),(95,'#5A8A7A')]:
         v = float(np.percentile(rets, pct))
         fig.add_vline(x=v, line_dash='dash', line_color=col, line_width=1.5,
                       annotation_text=f'{pct}th:{v:.1f}%',
                       annotation_font=dict(color=col, size=10), annotation_position='top')
-    fig.add_vline(x=0, line_color='rgba(255,255,255,.25)', line_width=1.2)
+    fig.add_vline(x=0, line_color='rgba(0,0,0,.15)', line_width=1.2)
     fig.update_layout(
-        title='一季末報酬率分佈', barmode='overlay',
-        xaxis=dict(title='報酬率 (%)', gridcolor='rgba(255,255,255,.06)'),
-        yaxis=dict(title='模擬次數', gridcolor='rgba(255,255,255,.06)'),
-        plot_bgcolor=_d, paper_bgcolor='rgba(14,17,23,0)', font=dict(color='white'),
-        legend=dict(orientation='h', y=1.05), height=320,
+        title=dict(text='一季末報酬率分佈', font=dict(color=_font)),
+        barmode='overlay',
+        xaxis=dict(title='報酬率 (%)', gridcolor=_grid, color=_font),
+        yaxis=dict(title='模擬次數', gridcolor=_grid, color=_font),
+        plot_bgcolor=_plot, paper_bgcolor=_bg, font=dict(color=_font),
+        legend=dict(orientation='h', y=1.05, bgcolor='rgba(255,255,255,0)',
+                    font=dict(color=_font)),
+        height=320,
     )
     return fig
 
 
 def chart_scores(sorted_stocks: list) -> go.Figure:
+    """GA 評分條形圖（Morandi 淺色主題）。"""
     codes  = [c for c, _ in sorted_stocks]
     scores = [s for _, s in sorted_stocks]
-    _d = 'rgba(14,17,23,1)'
+
+    _bg   = 'rgba(0,0,0,0)'
+    _plot = '#FDFBF7'
+    _grid = 'rgba(0,0,0,0.05)'
+    _font = '#4A4A4A'
+
     fig = go.Figure(go.Bar(
         x=scores, y=codes, orientation='h',
-        marker_color=['#e84545' if s >= 0 else '#26a69a' for s in scores],
-        text=[f"{s:+.4f}" for s in scores], textposition='outside',
+        marker_color=['#C97870' if s >= 0 else '#6B9E8E' for s in scores],
+        text=[f"{s:+.4f}" for s in scores],
+        textposition='outside',
+        textfont=dict(color=_font, size=11),
     ))
-    fig.add_vline(x=0, line_color='rgba(255,255,255,.18)', line_width=1.2)
+    fig.add_vline(x=0, line_color='rgba(0,0,0,.15)', line_width=1.2)
     fig.update_layout(
-        title='GA 評分（紅=看多 綠=看空）',
-        xaxis=dict(gridcolor='rgba(255,255,255,.06)',
+        title=dict(text='GA 評分（消紅=看多　消綠=看空）', font=dict(color=_font)),
+        xaxis=dict(gridcolor=_grid, color=_font,
                    range=[min(scores)*1.4-.1, max(scores)*1.4+.1]),
-        yaxis=dict(autorange='reversed'),
-        plot_bgcolor=_d, paper_bgcolor='rgba(14,17,23,0)', font=dict(color='white'),
+        yaxis=dict(autorange='reversed', color=_font),
+        plot_bgcolor=_plot, paper_bgcolor=_bg, font=dict(color=_font),
         height=max(260, len(codes)*42+80), margin=dict(l=70, r=110, t=50, b=40),
     )
     return fig
@@ -520,18 +840,27 @@ def chart_fitness(history: list) -> go.Figure:
         return go.Figure()
     gens, best_f, avg_f = zip(*[(h['generation'], h['best_fitness'], h['avg_fitness'])
                                  for h in history])
-    _d = 'rgba(14,17,23,1)'
+
+    _bg   = 'rgba(0,0,0,0)'
+    _plot = '#FDFBF7'
+    _grid = 'rgba(0,0,0,0.05)'
+    _font = '#4A4A4A'
+
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=gens, y=best_f, mode='lines+markers',
-                              line=dict(color='#4c9be8', width=2.2), marker=dict(size=3), name='最佳'))
+                              line=dict(color='#607D8B', width=2.2),
+                              marker=dict(size=3, color='#607D8B'), name='最佳'))
     fig.add_trace(go.Scatter(x=gens, y=avg_f, mode='lines',
-                              line=dict(color='rgba(255,215,60,.75)', width=1.5, dash='dot'), name='平均'))
+                              line=dict(color='rgba(184,150,106,.80)', width=1.5, dash='dot'),
+                              name='平均'))
     fig.update_layout(
-        title='GA 適應度收斂',
-        xaxis=dict(title='代數', gridcolor='rgba(255,255,255,.06)'),
-        yaxis=dict(title='適應度', gridcolor='rgba(255,255,255,.06)'),
-        plot_bgcolor=_d, paper_bgcolor='rgba(14,17,23,0)', font=dict(color='white'),
-        legend=dict(orientation='h', y=1.08), height=300,
+        title=dict(text='GA 適應度收斂', font=dict(color=_font)),
+        xaxis=dict(title='代數', gridcolor=_grid, color=_font),
+        yaxis=dict(title='適應度', gridcolor=_grid, color=_font),
+        plot_bgcolor=_plot, paper_bgcolor=_bg, font=dict(color=_font),
+        legend=dict(orientation='h', y=1.08, bgcolor='rgba(255,255,255,0)',
+                    font=dict(color=_font)),
+        height=300,
     )
     return fig
 
@@ -579,9 +908,9 @@ def render_holdings_table(rows: list[dict]) -> None:
 
     def _tw(val):
         if not isinstance(val, (int, float)) or pd.isna(val): return ''
-        if val > 0: return 'color:#e84545;font-weight:600'
-        if val < 0: return 'color:#26a69a;font-weight:600'
-        return 'color:#6b7fa8'
+        if val > 0: return 'color:#B85450;font-weight:600'
+        if val < 0: return 'color:#5A8A7A;font-weight:600'
+        return 'color:#9E9E9E'
 
     styled = df.style
     color_cols = ['漲跌幅(%)', '今日損益', '未實現損益', '未實現%']
@@ -599,12 +928,13 @@ def render_holdings_table(rows: list[dict]) -> None:
 
 
 _ACTION_STYLE = {
-    'STOP_LOSS': ('rgba(50,20,20,0.85)',  '#e84545', '🛑'),
-    'SWITCH':    ('rgba(40,35,10,0.85)',  '#ffd700', '⚡'),
-    'NEW_BUY':   ('rgba(15,25,45,0.85)', '#4c9be8', '🆕'),
-    'HOLD':      ('rgba(15,35,25,0.85)', '#26a69a', '✅'),
-    'WATCH':     ('rgba(25,25,35,0.85)', '#8888cc', '👁️'),
-    'CASH':      ('rgba(20,22,32,0.85)', '#6b7fa8', '💰'),
+    # (背景色, 左邊框色, emoji)  ── Morandi 暖調淺背景
+    'STOP_LOSS': ('rgba(184,84,80,0.08)',   '#B85450', '🛑'),
+    'SWITCH':    ('rgba(184,150,106,0.10)', '#B8966A', '⚡'),
+    'NEW_BUY':   ('rgba(96,125,139,0.09)',  '#607D8B', '🆕'),
+    'HOLD':      ('rgba(90,138,122,0.08)',  '#5A8A7A', '✅'),
+    'WATCH':     ('rgba(122,110,158,0.08)', '#7A6E9E', '👁️'),
+    'CASH':      ('rgba(158,158,158,0.08)', '#9E9E9E', '💰'),
 }
 
 
@@ -631,13 +961,13 @@ def render_daily_guide(guide: list[dict]) -> None:
     st.markdown("---")
     st.markdown("##### 詳細操作說明")
     for item in guide:
-        bg, border, _ = _ACTION_STYLE.get(item['action'], ('rgba(20,22,32,.85)', '#6b7fa8', '─'))
+        bg, border, _ = _ACTION_STYLE.get(item['action'], ('rgba(158,158,158,0.07)', '#9E9E9E', '─'))
         st.markdown(f"""
         <div style="background:{bg};border-left:4px solid {border};
                     border-radius:0 10px 10px 0;padding:14px 20px;margin:10px 0;">
-          <div style="font-size:1.05rem;font-weight:700;color:#e0e8f8;margin-bottom:6px;">
+          <div style="font-size:1.05rem;font-weight:700;color:#383838;margin-bottom:6px;">
             {item['icon']}&nbsp;&nbsp;{item['label']}</div>
-          <div style="color:#c8d4e8;font-size:.9rem;line-height:1.6;">{item['summary']}</div>
+          <div style="color:#5A5A5A;font-size:.9rem;line-height:1.6;">{item['summary']}</div>
         </div>""", unsafe_allow_html=True)
 
         if item.get('detail'):
@@ -676,7 +1006,7 @@ def _kline_body(available_codes: list[str], quotes: dict) -> None:
                 f"<span style='font-size:1.3rem;font-weight:700;color:{col};'>"
                 f"NT${q['price']:.2f}&nbsp;{arr}&nbsp;{abs(q['change_pct']):.2%}"
                 f"&nbsp;<span style='font-size:.85rem;'>({q['change']:+.2f})</span></span>"
-                f"&nbsp;&nbsp;<span style='color:#6b7fa8;font-size:.82rem;'>"
+                f"&nbsp;&nbsp;<span style='color:#9E9E9E;font-size:.82rem;'>"
                 f"成交量 {q['volume']:,.0f}&nbsp;·&nbsp;{q.get('trade_date','')}</span>",
                 unsafe_allow_html=True,
             )
@@ -892,17 +1222,19 @@ def main() -> None:
     col_h, col_r = st.columns([5, 1])
     with col_h:
         badge = (
-            "<span style='background:#e84545;color:#fff;border-radius:4px;"
-            "font-size:.72rem;padding:2px 8px;margin-left:8px;'>⚡ 短線</span>"
+            "<span style='background:#B85450;color:#fff;border-radius:20px;"
+            "font-size:.70rem;padding:2px 10px;margin-left:10px;letter-spacing:.04em;'>⚡ 短線</span>"
             if config['short_term_mode'] else
-            "<span style='background:#4c9be8;color:#fff;border-radius:4px;"
-            "font-size:.72rem;padding:2px 8px;margin-left:8px;'>🔵 長線</span>"
+            "<span style='background:#607D8B;color:#fff;border-radius:20px;"
+            "font-size:.70rem;padding:2px 10px;margin-left:10px;letter-spacing:.04em;'>● 長線</span>"
         )
         st.markdown(
-            f"<h1 style='margin:0;font-size:1.55rem;color:#e0e8f8;'>"
+            f"<h1 style='margin:0;font-size:1.55rem;color:#383838;"
+            f"font-family:Noto Serif TC,Georgia,serif;'>"
             f"📈 台股量化交易儀表板{badge}</h1>"
-            f"<p style='color:#6b7fa8;font-size:.8rem;margin:2px 0 0;'>"
-            f"GA × Monte Carlo × Real-time Dashboard  |  v4.0  ·  {username}</p>",
+            f"<p style='color:#9E9E9E;font-size:.80rem;margin:4px 0 0;"
+            f"font-family:Noto Sans TC,Inter,sans-serif;'>"
+            f"GA × Monte Carlo × Real-time Dashboard  ·  v4.0  ·  {username}</p>",
             unsafe_allow_html=True,
         )
     with col_r:
@@ -944,9 +1276,7 @@ def main() -> None:
 
         # 思考鏈監控視窗
         st.markdown(
-            "<div style='font-size:.78rem;font-weight:600;color:#4c9be8;"
-            "letter-spacing:.1em;margin:12px 0 6px;'>"
-            "🧠 THINKING LOG  ─  AI 推理過程監控</div>",
+            "<div class='section-bar'>🧠 THINKING LOG  ─  AI 推理過程監控</div>",
             unsafe_allow_html=True,
         )
         think_container = st.empty()
@@ -990,10 +1320,12 @@ def main() -> None:
         render_analysis_tabs(res, cfg)
     else:
         st.markdown("""
-        <div style="text-align:center;padding:40px 0;color:#4a5568;">
-          <div style="font-size:2.5rem;margin-bottom:10px;">🧬</div>
-          <p>點擊左側 <b style="color:#4c9be8;">🚀 執行推演</b> 啟動 GA 優化與蒙地卡羅模擬</p>
-          <p style="font-size:.82rem;">系統將自動依你的持倉與資金，產出個性化買入建議</p>
+        <div style="text-align:center;padding:48px 0 32px;color:#9E9E9E;">
+          <div style="font-size:2.4rem;margin-bottom:14px;opacity:.55;">🧬</div>
+          <p style="color:#7A7A7A;font-size:.95rem;margin:0 0 6px;">
+            點擊左側 <b style="color:#607D8B;">🚀 執行推演</b> 啟動 GA 優化與蒙地卡羅模擬</p>
+          <p style="color:#AEAEAE;font-size:.80rem;margin:0;">
+            系統將自動依你的持倉與資金，產出個性化買入建議</p>
         </div>""", unsafe_allow_html=True)
 
     st.markdown("---")

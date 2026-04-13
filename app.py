@@ -25,12 +25,10 @@ import auth
 import engine
 from engine import (
     ThinkingLogger,
-    generate_asset_driven_pool,
     compute_portfolio_summary,
     build_holdings_rows,
     generate_daily_guide,
     run_full_pipeline,
-    TW_STOCK_UNIVERSE,
     TW_STOCK_NAMES,
 )
 from data_fetcher import DataFetcher, get_tw_daily_snapshot, fetch_with_funnel
@@ -602,8 +600,8 @@ def render_settings_tab(username: str) -> tuple[dict, bool]:
         )[:50]
         _auto_pool_source = "市場漏斗"
     else:
-        auto_pool = generate_asset_driven_pool(available_cash, current_holdings)
-        _auto_pool_source = "資產導向"
+        auto_pool = list(current_holdings.keys())
+        _auto_pool_source = "API_未就緒"
 
     pool_mode = st.radio(
         "pool_mode", ["🤖 資產導向（自動）", "✏️ 手動輸入"],
@@ -611,7 +609,7 @@ def render_settings_tab(username: str) -> tuple[dict, bool]:
     )
     if pool_mode == "🤖 資產導向（自動）":
         target_pool = auto_pool
-        _src_badge = "🌐 全市場漏斗篩選" if _auto_pool_source == "市場漏斗" else "📋 資產導向（API 未就緒）"
+        _src_badge = "🌐 全市場漏斗篩選" if _auto_pool_source == "市場漏斗" else "⚠️ 市場 API 未就緒（僅含現有持股，可改用手動輸入）"
         st.caption(
             f"{_src_badge}，共 {len(target_pool)} 支候選：\n"
             f"`{'、'.join(target_pool[:6])}{'…' if len(target_pool) > 6 else ''}`"
@@ -1577,11 +1575,14 @@ def main() -> None:
                 # 以實際下載成功的代號作為分析股池
                 analysis_pool = [c for c in pool if c in stock_data]
             else:
-                # Fallback：下載用戶指定的股池
-                all_hist_codes = tuple(sorted(set(list(ch.keys()) + pool)))
-                stock_data = fetch_pool_history(all_hist_codes)
+                # 市場快照 API 未就緒，僅分析現有持股（不使用硬編碼股池）
                 funnel_reasons = {}
-                analysis_pool = pool
+                if ch:
+                    stock_data = fetch_pool_history(tuple(sorted(ch.keys())))
+                    analysis_pool = [c for c in ch.keys() if c in stock_data]
+                else:
+                    st.warning("市場快照 API 目前無法連線，且尚無持股可供分析。請稍後再試，或改用手動輸入候選股池。")
+                    st.stop()
 
             results = run_full_pipeline(
                 cash, ch, analysis_pool, stock_data,

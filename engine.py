@@ -41,6 +41,31 @@ TW_STOCK_UNIVERSE: dict[str, list[str]] = {
 }
 ALL_UNIVERSE: list[str] = [c for lst in TW_STOCK_UNIVERSE.values() for c in lst]
 
+# 代號 → 中文名稱對照表（涵蓋 TW_STOCK_UNIVERSE 全部成分股）
+TW_STOCK_NAMES: dict[str, str] = {
+    # 半導體
+    '2330': '台積電',   '2454': '聯發科',   '3711': '日月光投控',
+    '2379': '瑞昱',     '2344': '華邦電',   '2303': '聯電',
+    '2337': '旺宏',     '3034': '聯詠',
+    # 電子製造
+    '2317': '鴻海',     '2382': '廣達',     '2308': '台達電',
+    '2357': '華碩',     '2324': '仁寶',     '2327': '國巨',
+    '2376': '技嘉',     '2395': '研華',
+    # 金融
+    '2881': '富邦金',   '2882': '國泰金',   '2891': '中信金',
+    '2884': '玉山金',   '2886': '兆豐金',   '2892': '第一金',
+    '2885': '元大金',   '2883': '開發金',
+    # 傳產原料
+    '1301': '台塑',     '1303': '南亞',     '6505': '台塑化',
+    '2002': '中鋼',     '1101': '台泥',     '1216': '統一',
+    '2912': '統一超',
+    # 電信服務
+    '2412': '中華電',   '3045': '台灣大',   '4904': '遠傳',
+    # 其他電子
+    '2301': '光寶科',   '2385': '群光',     '3008': '大立光',
+    '2352': '佳世達',   '3231': '緯創',
+}
+
 
 # ═══════════════════════════════════════════════════════════════
 #  思考鏈記錄器
@@ -276,6 +301,7 @@ def generate_daily_guide(
         current_holdings: dict,
         available_cash: float,
         quotes: dict,
+        strategy_reasons: dict | None = None,
 ) -> list[dict]:
     """
     今日操作指南決策引擎。
@@ -292,10 +318,16 @@ def generate_daily_guide(
       ⑤ NEW_BUY    — 現金 ≥ NT$50,000 且有評分 > 0.20 的未持有標的
       ⑥ CASH       — 無明確買入信號，保留現金
 
+    strategy_reasons : {code: build_strategy_reason() 返回值}，
+                       可為 None（向下相容）
+
     Returns
     -------
     list of action dicts，按優先級排序（URGENT → HIGH → MEDIUM → LOW）
+    每個 dict 新增 'strategy_reason' key。
     """
+    _sr    = strategy_reasons or {}
+    _empty = {"primary_reason": "─", "tags": [], "signal_detail": {}, "summary": ""}
     guide: list[dict] = []
 
     candidates = sorted(
@@ -334,6 +366,7 @@ def generate_daily_guide(
                     f"- 近5日均信號：{signal:+.3f}（門檻 < -0.15）"
                 ),
                 'excess_return': None, 'breakeven_months': None,
+                'strategy_reason': _sr.get(code, _empty),
             })
             continue
 
@@ -382,6 +415,7 @@ def generate_daily_guide(
                     ),
                     'excess_return': excess_annual,
                     'breakeven_months': breakeven_m,
+                    'strategy_reason': _sr.get(best_code if is_worthwhile else code, _empty),
                 })
                 continue
 
@@ -402,6 +436,7 @@ def generate_daily_guide(
                     f"- 未實現損益：NT${pnl:+,.0f}（{pnl_pct:+.2%}）"
                 ),
                 'excess_return': None, 'breakeven_months': None,
+                'strategy_reason': _sr.get(code, _empty),
             })
             continue
 
@@ -419,6 +454,7 @@ def generate_daily_guide(
                 f"- 未實現損益：NT${pnl:+,.0f}（{pnl_pct:+.2%}）"
             ),
             'excess_return': None, 'breakeven_months': None,
+            'strategy_reason': _sr.get(code, _empty),
         })
 
     # ── 閒置現金判斷 ──────────────────────────────────────────
@@ -456,6 +492,7 @@ def generate_daily_guide(
                         f"- 建議分批建倉，不要一次全押"
                     ),
                     'excess_return': None, 'breakeven_months': None,
+                    'strategy_reason': _sr.get(best_code, _empty),
                 })
             else:
                 guide.append({
@@ -467,6 +504,7 @@ def generate_daily_guide(
                         f"資金不足買整張，等待回調。"
                     ),
                     'detail': '', 'excess_return': None, 'breakeven_months': None,
+                    'strategy_reason': _empty,
                 })
     elif available_cash >= 50_000:
         guide.append({
@@ -478,11 +516,115 @@ def generate_daily_guide(
                 f"目前無明確正向信號標的，保留現金等待機會。"
             ),
             'detail': '', 'excess_return': None, 'breakeven_months': None,
+            'strategy_reason': _empty,
         })
 
     _order = {'URGENT': 0, 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3}
     guide.sort(key=lambda x: _order.get(x['priority'], 9))
     return guide
+
+
+# ═══════════════════════════════════════════════════════════════
+#  策略依據診斷
+# ═══════════════════════════════════════════════════════════════
+
+def build_strategy_reason(
+        df: pd.DataFrame,
+        params: dict,
+        ga_score: float,
+        short_term_mode: bool = True,
+) -> dict:
+    """
+    根據個股最新技術指標，診斷本次推薦的核心依據。
+
+    Returns
+    -------
+    dict with keys:
+      primary_reason : str   主要依據標籤（英文，供 badge 顯示）
+      tags           : list  所有觸發標籤（中文）
+      signal_detail  : dict  各指標最新數值（MA / RSI / BB / KDJ / Vol）
+      summary        : str   自然語言摘要（中文）
+    """
+    prices = df['Close'].dropna()
+    min_len = max(params.get('ma_long', 20) + 5, 30)
+    if len(prices) < min_len:
+        return {"primary_reason": "Data Limited", "tags": [], "signal_detail": {}, "summary": "歷史數據不足"}
+
+    # ── 計算各技術信號（取近 3 日均值，降低噪訊）──────────────
+    ma_s  = TechnicalFactors.ma_signal(prices, params['ma_short'], params['ma_long'])
+    rsi_s = TechnicalFactors.rsi_signal(prices, params['rsi_period'], params['rsi_ob'], params['rsi_os'])
+    bb_s  = TechnicalFactors.bb_signal(prices, params['bb_period'], params['bb_std'])
+    rsi_r = TechnicalFactors._rsi_raw(prices, params['rsi_period'])
+
+    ma_val  = float(ma_s.iloc[-3:].mean())
+    rsi_val = float(rsi_s.iloc[-3:].mean())
+    bb_val  = float(bb_s.iloc[-3:].mean())
+    rsi_lvl = float(rsi_r.iloc[-1])
+
+    signal_detail: dict = {
+        'MA':      round(ma_val,  3),
+        'RSI_sig': round(rsi_val, 3),
+        'RSI':     round(rsi_lvl, 1),
+        'BB':      round(bb_val,  3),
+    }
+
+    kdj_val = vol_val = 0.0
+    if short_term_mode and all(c in df.columns for c in ['High', 'Low', 'Volume']):
+        kdj_s   = TechnicalFactors.kdj_signal(df['High'], df['Low'], df['Close'])
+        vol_s   = TechnicalFactors.volume_burst_signal(df['Close'], df['Volume'])
+        kdj_val = float(kdj_s.iloc[-3:].mean())
+        vol_val = float(vol_s.iloc[-3:].mean())
+        signal_detail['KDJ'] = round(kdj_val, 3)
+        signal_detail['Vol'] = round(vol_val, 3)
+
+    # ── 觸發標籤 ──────────────────────────────────────────────
+    tags: list[str] = []
+    os_thr = params.get('rsi_os', 30)
+
+    if   ma_val > 0.20: tags.append("均線強勢突破")
+    elif ma_val > 0.08: tags.append("均線多頭")
+
+    if   rsi_lvl < os_thr:         tags.append(f"RSI 超賣 ({rsi_lvl:.0f})")
+    elif rsi_lvl < os_thr + 8:     tags.append(f"RSI 低檔 ({rsi_lvl:.0f})")
+    elif rsi_val > 0.15:            tags.append("RSI 回升動能")
+
+    if   bb_val > 0.35: tags.append("布林下軌反彈")
+    elif bb_val > 0.15: tags.append("布林帶偏多")
+
+    if   kdj_val > 0.35: tags.append("KDJ 超賣反彈")
+    elif kdj_val > 0.12: tags.append("KDJ 偏多")
+
+    if   vol_val > 0.25: tags.append("量能爆發")
+    elif vol_val > 0.10: tags.append("量能放大")
+
+    if   ga_score > 0.30: tags.append("GA 高評分")
+    if not tags:          tags.append("綜合信號偏多")
+
+    # ── 主要依據（最強因子優先）──────────────────────────────
+    if   vol_val  > 0.25:         primary = "Volume Breakout"
+    elif kdj_val  > 0.35:         primary = "KDJ Oversold"
+    elif ma_val   > 0.20:         primary = "Technical Breakout"
+    elif rsi_lvl  < os_thr:       primary = f"Low RSI ({rsi_lvl:.0f})"
+    elif bb_val   > 0.35:         primary = "BB Rebound"
+    elif rsi_val  > 0.15:         primary = "RSI Recovery"
+    elif ga_score > 0.25:         primary = "High GA Score"
+    else:                          primary = "Mixed Signals"
+
+    # ── 自然語言摘要 ─────────────────────────────────────────
+    parts: list[str] = []
+    if ma_val  > 0.08:         parts.append(f"均線多頭 {ma_val:+.2f}")
+    if rsi_lvl < os_thr + 8:   parts.append(f"RSI {rsi_lvl:.0f}")
+    if bb_val  > 0.15:         parts.append(f"布林帶 {bb_val:+.2f}")
+    if kdj_val > 0.12:         parts.append(f"KDJ {kdj_val:+.2f}")
+    if vol_val > 0.10:         parts.append(f"量能 {vol_val:+.2f}")
+    summary = "  ·  ".join(parts) if parts else f"GA {ga_score:+.4f}"
+
+    return {
+        "primary_reason": primary,
+        "tags":           tags,
+        "signal_detail":  signal_detail,
+        "summary":        summary,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -594,6 +736,21 @@ def run_full_pipeline(
         'sorted_stocks':   sorted_stocks,
         'fitness_history': ga.fitness_history,
     })
+
+    # ── 策略依據診斷（每支評分股計算一次）──────────────────────
+    _think("計算各股技術因子，生成策略依據標籤...", 'signal')
+    strategy_reasons: dict = {}
+    for _code, _score in stock_scores.items():
+        if _code in pool_data:
+            try:
+                strategy_reasons[_code] = build_strategy_reason(
+                    pool_data[_code], best_params, _score, short_term_mode,
+                )
+            except Exception:
+                strategy_reasons[_code] = {
+                    "primary_reason": "─", "tags": [], "signal_detail": {}, "summary": "",
+                }
+    results['strategy_reasons'] = strategy_reasons
     _prog.progress(65)
 
     # ── Step 3：蒙地卡羅模擬 ─────────────────────────────────
@@ -644,6 +801,10 @@ def run_full_pipeline(
         recommendations = analyzer.recommend_switches(
             holdings_analysis, cand_scores, cand_data
         )
+        # 注入策略依據到每筆換股建議
+        _empty_r = {"primary_reason": "─", "tags": [], "signal_detail": {}, "summary": ""}
+        for _rec in recommendations:
+            _rec['strategy_reason'] = strategy_reasons.get(_rec['buy_code'], _empty_r)
         if recommendations:
             _think(f"發現 {len(recommendations)} 筆換股機會", 'warn')
 

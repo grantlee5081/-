@@ -18,7 +18,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+import streamlit.components.v1 as components
 
 # ── 本地模組 ──────────────────────────────────────────────────
 import auth
@@ -31,6 +31,7 @@ from engine import (
     generate_daily_guide,
     run_full_pipeline,
     TW_STOCK_UNIVERSE,
+    TW_STOCK_NAMES,
 )
 from data_fetcher import DataFetcher
 
@@ -370,6 +371,12 @@ hr { border: none !important; border-top: 1px solid var(--border) !important; ma
 """, unsafe_allow_html=True)
 
 
+def _stock_label(code: str) -> str:
+    """將代號轉為「代號 中文名」顯示標籤，無對應名稱時只返回代號。"""
+    name = TW_STOCK_NAMES.get(code, '')
+    return f"{code} {name}" if name else code
+
+
 # ═══════════════════════════════════════════════════════════════
 #  快取數據函數（唯一接觸 yfinance 的層）
 # ═══════════════════════════════════════════════════════════════
@@ -406,6 +413,7 @@ def fetch_realtime_quotes(codes: tuple[str, ...]) -> dict[str, dict]:
                     'volume': float(raw['Volume'].iloc[-1]),
                     'trade_date': raw.index[-1].strftime('%Y-%m-%d'),
                     'suffix': suffix,
+                    'name': TW_STOCK_NAMES.get(code, ''),
                 }
                 break
             except Exception:
@@ -494,38 +502,33 @@ def render_auth_page() -> bool:
 
 
 # ═══════════════════════════════════════════════════════════════
-#  側邊欄（含用戶設定 + 資產導向股池 + 短線模式切換）
+#  設定標籤、儀表板標籤、分析標籤
 # ═══════════════════════════════════════════════════════════════
 
-def render_sidebar(username: str) -> dict:
-    with st.sidebar:
-        # 用戶資訊列
-        col_u, col_out = st.columns([3, 1])
-        col_u.markdown(
-            f"<div style='color:var(--accent,#607D8B);font-size:.85rem;font-weight:600;'>"
-            f"👤  {username}</div>", unsafe_allow_html=True,
-        )
-        if col_out.button("登出", key="btn_logout"):
-            for k in ('_username', '_user_settings', '_results', '_config', '_has_results'):
-                st.session_state.pop(k, None)
-            st.rerun()
+def render_settings_tab(username: str) -> tuple[dict, bool]:
+    """
+    全部策略設定（原側邊欄內容移至此處）。
+    Returns (config dict, run_clicked bool)。
+    """
+    saved = st.session_state.get('_user_settings', {})
 
-        st.markdown("---")
-        st.markdown("## ⚙️ 策略設定")
-        saved = st.session_state.get('_user_settings', {})
+    st.markdown("### ⚙️ 策略設定")
 
-        # 可用現金
-        st.markdown("#### 💰 可用現金（NT$）")
+    # ── 資金 & 持股（水平兩欄）────────────────────────────────
+    st.markdown('<div class="section-bar">💰 資金與持股</div>', unsafe_allow_html=True)
+    col_cash, col_hold = st.columns([1, 2])
+
+    with col_cash:
+        st.markdown("**可用現金（NT$）**")
         available_cash = st.number_input(
             "cash", min_value=10_000, max_value=100_000_000,
             value=int(saved.get('available_cash', 500_000)),
             step=10_000, format="%d", label_visibility='collapsed',
         )
         st.caption(f"NT$ {available_cash:,}")
-        st.markdown("---")
 
-        # 現有持股（data_editor）
-        st.markdown("#### 📋 現有持股")
+    with col_hold:
+        st.markdown("**現有持股**")
         st.caption("代號填純數字（不含 .TW），可動態新增 / 刪除")
         saved_holdings = saved.get('current_holdings', {})
         default_rows = (
@@ -542,45 +545,51 @@ def render_sidebar(username: str) -> dict:
                 '買入均價': st.column_config.NumberColumn('均價', min_value=0.01, format="%.2f"),
                 '持有股數': st.column_config.NumberColumn('股數', min_value=0, step=1000, format="%d"),
             },
-            key='holdings_editor',
+            key='cfg_holdings_editor',
         )
-        current_holdings: dict[str, dict] = {}
-        for _, row in h_df.dropna(subset=['代號']).iterrows():
-            code = str(row['代號']).strip()
-            if code and float(row.get('買入均價', 0) or 0) > 0:
-                current_holdings[code] = {
-                    'cost':   float(row['買入均價']),
-                    'shares': int(row.get('持有股數') or 0),
-                }
-        st.markdown("---")
 
-        # 候選股池（資產導向自動生成 or 手動）
-        st.markdown("#### 🎯 候選股池")
-        auto_pool = generate_asset_driven_pool(available_cash, current_holdings)
-        pool_mode = st.radio(
-            "pool_mode", ["🤖 資產導向（自動）", "✏️ 手動輸入"],
-            index=0, label_visibility='collapsed', horizontal=True,
+    current_holdings: dict[str, dict] = {}
+    for _, row in h_df.dropna(subset=['代號']).iterrows():
+        code = str(row['代號']).strip()
+        if code and float(row.get('買入均價', 0) or 0) > 0:
+            current_holdings[code] = {
+                'cost':   float(row['買入均價']),
+                'shares': int(row.get('持有股數') or 0),
+            }
+
+    st.markdown("---")
+
+    # ── 候選股池 ──────────────────────────────────────────────
+    st.markdown('<div class="section-bar">🎯 候選股池</div>', unsafe_allow_html=True)
+    auto_pool = generate_asset_driven_pool(available_cash, current_holdings)
+    pool_mode = st.radio(
+        "pool_mode", ["🤖 資產導向（自動）", "✏️ 手動輸入"],
+        index=0, label_visibility='collapsed', horizontal=True,
+    )
+    if pool_mode == "🤖 資產導向（自動）":
+        target_pool = auto_pool
+        st.caption(
+            f"依持倉結構自動推薦 {len(target_pool)} 支：\n"
+            f"`{'、'.join(target_pool[:6])}{'…' if len(target_pool) > 6 else ''}`"
         )
-        if pool_mode == "🤖 資產導向（自動）":
-            target_pool = auto_pool
-            st.caption(
-                f"依持倉結構自動推薦 {len(target_pool)} 支：\n"
-                f"`{'、'.join(target_pool[:6])}{'…' if len(target_pool) > 6 else ''}`"
-            )
-            if st.button("🔄 重新生成", key="regen_pool"):
-                st.rerun()
-        else:
-            saved_pool_str = ','.join(saved.get('target_pool', auto_pool))
-            pool_text = st.text_area(
-                "pool", value=saved_pool_str,
-                height=80, label_visibility='collapsed',
-            )
-            target_pool = [c.strip() for c in pool_text.replace('\n', ',').split(',') if c.strip()]
-            st.caption(f"共 {len(target_pool)} 支")
-        st.markdown("---")
+        if st.button("🔄 重新生成", key="regen_pool"):
+            st.rerun()
+    else:
+        saved_pool_str = ','.join(saved.get('target_pool', auto_pool))
+        pool_text = st.text_area(
+            "pool", value=saved_pool_str,
+            height=80, label_visibility='collapsed',
+        )
+        target_pool = [c.strip() for c in pool_text.replace('\n', ',').split(',') if c.strip()]
+        st.caption(f"共 {len(target_pool)} 支")
 
-        # 交易策略模式
-        st.markdown("#### ⚡ 交易策略")
+    st.markdown("---")
+
+    # ── 交易策略 & 進階參數（左右兩欄）───────────────────────
+    st.markdown('<div class="section-bar">⚡ 策略與參數</div>', unsafe_allow_html=True)
+    col_strat, col_params = st.columns([1, 2])
+
+    with col_strat:
         short_term_mode = st.toggle(
             "短線優先（KDJ + 量能強化）",
             value=saved.get('short_term_mode', True),
@@ -590,15 +599,16 @@ def render_sidebar(username: str) -> dict:
         st.caption("🔴 短線模式：GA 縮短週期，KDJ + 量能加權 40%"
                    if short_term_mode else
                    "🔵 長線模式：GA 標準週期，純技術信號")
-        st.markdown("---")
+        st.markdown("")
+        top_n = st.slider("📌 最終選股數", 1, 6, int(saved.get('top_n', 3)))
 
-        # 進階參數
-        with st.expander("🧬 遺傳演算法參數"):
+    with col_params:
+        with st.expander("🧬 遺傳演算法參數", expanded=False):
             pop = st.slider("種群大小", 20, 100, int(saved.get('ga_config', {}).get('population_size', 50)), step=10)
             gen = st.slider("演化代數", 20, 100, int(saved.get('ga_config', {}).get('generations', 50)), step=10)
             cr  = st.slider("交叉率",   0.50, 1.00, float(saved.get('ga_config', {}).get('crossover_rate', 0.80)), step=0.05)
             mr  = st.slider("變異率",   0.05, 0.30, float(saved.get('ga_config', {}).get('mutation_rate', 0.15)), step=0.05)
-        with st.expander("🎲 蒙地卡羅參數"):
+        with st.expander("🎲 蒙地卡羅參數", expanded=False):
             n_s = st.select_slider("路徑數",   options=[500, 1000, 2000, 5000],
                                    value=saved.get('mc_config', {}).get('n_simulations', 1000))
             n_d = st.select_slider("模擬天數", options=[10, 21, 42, 63, 126],
@@ -606,10 +616,12 @@ def render_sidebar(username: str) -> dict:
                                    format_func=lambda x: f"{x}日")
             if short_term_mode and n_d > 42:
                 st.caption("⚡ 短線模式建議模擬 10~21 日")
-        top_n = st.slider("📌 最終選股數", 1, 6, int(saved.get('top_n', 3)))
-        st.markdown("---")
 
-        # 儲存設定
+    st.markdown("---")
+
+    # ── 操作按鈕列 ────────────────────────────────────────────
+    btn1, btn2, btn3 = st.columns([2, 2, 1])
+    with btn1:
         if st.button("💾 儲存設定至帳號", use_container_width=True):
             auth.save_user_settings(username, {
                 'available_cash':   available_cash,
@@ -622,15 +634,16 @@ def render_sidebar(username: str) -> dict:
                 'short_term_mode':  short_term_mode,
             })
             st.success("✅ 設定已儲存！")
-
+    with btn2:
         run_clicked = st.button("🚀  執行推演", type="primary", use_container_width=True)
+    with btn3:
         if st.session_state.get('_has_results'):
-            if st.button("🗑️  清除結果", use_container_width=True):
+            if st.button("🗑️  清除", use_container_width=True):
                 for k in ('_results', '_config', '_has_results'):
                     st.session_state.pop(k, None)
                 st.rerun()
 
-    return {
+    config = {
         'available_cash':   available_cash,
         'current_holdings': current_holdings,
         'target_pool':      target_pool,
@@ -639,8 +652,76 @@ def render_sidebar(username: str) -> dict:
         'mc_config':        {'n_simulations': n_s, 'n_days': n_d},
         'top_n':            top_n,
         'short_term_mode':  short_term_mode,
-        'run_clicked':      run_clicked,
     }
+    return config, run_clicked
+
+
+def render_dashboard_tab(config: dict, quotes: dict) -> None:
+    """儀表板：設定摘要、KPI 快報、持股明細、K 線、今日操作指引。"""
+    ch   = config['current_holdings']
+    pool = config['target_pool']
+    cash = config['available_cash']
+
+    # 快速設定摘要（折疊式，預設收合）
+    with st.expander("⚙️ 目前設定摘要", expanded=not bool(ch)):
+        s1, s2, s3 = st.columns(3)
+        s1.metric("可用現金", f"NT${cash:,}")
+        s2.metric("持股數量", f"{len(ch)} 支")
+        s3.metric("候選股池", f"{len(pool)} 支")
+        if ch:
+            st.caption(
+                "持股：" + "  ·  ".join(
+                    f"**{_stock_label(c)}** × {v['shares']:,}股 @ NT${v['cost']:.1f}"
+                    for c, v in list(ch.items())[:5]
+                ) + ("  …" if len(ch) > 5 else "")
+            )
+        st.caption("如需修改請切換至 **⚙️ 設定** 頁籤。")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # KPI 快報
+    if ch:
+        render_top_kpi_bar(compute_portfolio_summary(ch, quotes, cash))
+    else:
+        st.info("ℹ️  在「⚙️ 設定」頁輸入持股後，此處將顯示即時資產快報。")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    if ch:
+        render_holdings_table(build_holdings_rows(ch, quotes))
+        st.markdown("<br>", unsafe_allow_html=True)
+
+    render_kline_section(list(dict.fromkeys(list(ch.keys()) + pool)), quotes)
+
+    # 今日操作指引（有結果時顯示）
+    if st.session_state.get('_has_results'):
+        res = st.session_state['_results']
+        cfg = st.session_state.get('_config', config)
+        st.markdown("---")
+        render_daily_guide(generate_daily_guide(
+            res['holdings_analysis'], res['stock_scores'],
+            cfg['current_holdings'], cfg['available_cash'], quotes,
+            strategy_reasons=res.get('strategy_reasons'),
+        ))
+
+
+def render_analysis_tab(config: dict) -> None:
+    """分析結果頁（GA + 蒙地卡羅 + 持股分析）。"""
+    if not st.session_state.get('_has_results'):
+        st.markdown("""
+        <div style="text-align:center;padding:48px 0 32px;">
+          <div style="font-size:2.4rem;margin-bottom:14px;opacity:.55;">🧬</div>
+          <p style="color:#7A7A7A;font-size:.95rem;margin:0 0 6px;">
+            切換至 <b style="color:#607D8B;">⚙️ 設定</b> 頁籤，點擊
+            <b style="color:#B85450;">🚀 執行推演</b> 啟動 GA 優化與蒙地卡羅模擬</p>
+          <p style="color:#AEAEAE;font-size:.80rem;margin:0;">
+            系統將自動依你的持倉與資金，產出個性化買入建議</p>
+        </div>""", unsafe_allow_html=True)
+        return
+
+    res = st.session_state['_results']
+    cfg = st.session_state.get('_config', config)
+    render_analysis_tabs(res, cfg)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -660,58 +741,168 @@ def _arrow(val: float) -> str:
     return '─'
 
 
-def chart_kline(df: pd.DataFrame, code: str) -> go.Figure:
-    """台股 K 線圖（60日）+ MA5/20/60 + 成交量副圖（Morandi 淺色主題）。"""
+def render_kline_lwc(df: pd.DataFrame, code: str) -> None:
+    """
+    TradingView Lightweight Charts K 線圖。
+    ‣ 支援手機觸控：單指拖移平移、雙指 pinch 縮放
+    ‣ 成交量以半透明色塊疊在價格區下方 25%
+    ‣ MA5 / MA20 / MA60 折線
+    ‣ 十字線懸停顯示 OHLC 數值
+    ‣ 無需額外 Python 套件（直接 embed Lightweight Charts v4 CDN）
+    """
+    import json
+
     df = df.tail(60).copy()
-    for p, c in [(5, 'MA5'), (20, 'MA20'), (60, 'MA60')]:
-        df[c] = df['Close'].rolling(p).mean()
-    # Morandi 低飽和漲跌色
-    vol_colors = ['#C97870' if c >= o else '#6B9E8E'
-                  for c, o in zip(df['Close'], df['Open'])]
+    df.index = pd.to_datetime(df.index)
+    for p, col in [(5, 'MA5'), (20, 'MA20'), (60, 'MA60')]:
+        df[col] = df['Close'].rolling(p).mean()
 
-    _bg   = 'rgba(0,0,0,0)'         # 透明背景（讓 CSS linen 底色顯示）
-    _plot = '#FDFBF7'               # 圖表繪圖區淺底
-    _grid = 'rgba(0,0,0,0.05)'     # 淺灰格線
-    _font = '#4A4A4A'              # 深灰字
+    def _ts(idx):
+        return idx.strftime('%Y-%m-%d') if hasattr(idx, 'strftime') else str(idx)[:10]
 
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
-                        row_heights=[0.75, 0.25], vertical_spacing=0.025)
-    fig.add_trace(go.Candlestick(
-        x=df.index, open=df['Open'], high=df['High'],
-        low=df['Low'], close=df['Close'],
-        increasing_line_color='#B85450', increasing_fillcolor='#C97870',
-        decreasing_line_color='#5A8A7A', decreasing_fillcolor='#6B9E8E',
-        line_width=1, name='K線', showlegend=False,
-    ), row=1, col=1)
-    for col_n, color, name in [
-        ('MA5',  '#B8966A', 'MA5'),    # 琥珀
-        ('MA20', '#607D8B', 'MA20'),   # 霧藍
-        ('MA60', '#7A9E87', 'MA60'),   # 鼠尾草綠
-    ]:
-        fig.add_trace(go.Scatter(x=df.index, y=df[col_n], mode='lines',
-                                  line=dict(color=color, width=1.4), name=name), row=1, col=1)
-    fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=vol_colors,
-                          marker_line_width=0, name='成交量', showlegend=False, opacity=0.75),
-                  row=2, col=1)
-    fig.add_hline(y=float(df['Close'].iloc[-1]), row=1, col=1,
-                  line_dash='dot', line_color='rgba(96,125,139,0.35)', line_width=1)
-    fig.update_layout(
-        title=dict(text=f'<b>{code}</b>　近 60 日 K 線',
-                   font=dict(size=14, color=_font, family='Noto Serif TC, Georgia, serif')),
-        xaxis_rangeslider_visible=False,
-        plot_bgcolor=_plot, paper_bgcolor=_bg,
-        font=dict(color=_font, size=11), height=500,
-        margin=dict(l=60, r=40, t=50, b=30),
-        legend=dict(orientation='h', y=1.01, x=0, bgcolor='rgba(255,255,255,0)',
-                    font=dict(size=11, color=_font)),
-        hovermode='x unified',
-        yaxis=dict(title='股價 (NT$)', gridcolor=_grid, tickformat=',.1f', side='right',
-                   color=_font, linecolor='rgba(0,0,0,0.08)'),
-        yaxis2=dict(title='成交量', gridcolor=_grid, tickformat='.2s', side='right',
-                    color=_font),
-    )
-    fig.update_xaxes(gridcolor=_grid, color=_font, linecolor='rgba(0,0,0,0.08)')
-    return fig
+    candles_js = json.dumps([
+        {"time": _ts(idx),
+         "open":  round(float(r['Open']),  2),
+         "high":  round(float(r['High']),  2),
+         "low":   round(float(r['Low']),   2),
+         "close": round(float(r['Close']), 2)}
+        for idx, r in df.iterrows()
+    ])
+    volume_js = json.dumps([
+        {"time":  _ts(idx),
+         "value": float(r['Volume']),
+         "color": "#C9787088" if float(r['Close']) >= float(r['Open']) else "#6B9E8E88"}
+        for idx, r in df.iterrows()
+    ])
+
+    def _ma_js(col):
+        return json.dumps([
+            {"time": _ts(idx), "value": round(float(v), 2)}
+            for idx, v in df[col].dropna().items()
+        ])
+
+    ma5_js  = _ma_js('MA5')
+    ma20_js = _ma_js('MA20')
+    ma60_js = _ma_js('MA60')
+    label   = _stock_label(code)
+
+    html = f"""<!DOCTYPE html>
+<html><head>
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+html,body{{background:#FDFBF7;overflow:hidden;height:100%;width:100%}}
+#chart{{width:100%;height:460px}}
+#legend{{
+  position:absolute;top:8px;left:12px;z-index:10;
+  font-size:11px;font-family:'Inter',sans-serif;
+  color:#7A7A7A;pointer-events:none;line-height:1.7
+}}
+</style></head>
+<body>
+<div style="position:relative">
+  <div id="legend"></div>
+  <div id="chart"></div>
+</div>
+<script>
+const CANDLES={candles_js};
+const VOLUME={volume_js};
+const MA5={ma5_js};
+const MA20={ma20_js};
+const MA60={ma60_js};
+
+const chart = LightweightCharts.createChart(document.getElementById('chart'), {{
+  autoSize: true,
+  layout: {{
+    background: {{type:'solid',color:'#FDFBF7'}},
+    textColor: '#4A4A4A',
+    fontFamily: "'Inter', sans-serif",
+  }},
+  grid: {{
+    vertLines: {{color:'rgba(0,0,0,0.04)'}},
+    horzLines: {{color:'rgba(0,0,0,0.04)'}},
+  }},
+  crosshair: {{mode: 1}},
+  rightPriceScale: {{
+    borderColor: 'rgba(0,0,0,0.08)',
+    scaleMargins: {{top:0.06, bottom:0.26}},
+  }},
+  timeScale: {{
+    borderColor: 'rgba(0,0,0,0.08)',
+    timeVisible: true,
+    secondsVisible: false,
+    fixRightEdge: true,
+  }},
+  handleScroll: {{
+    mouseWheel: true,
+    pressedMouseMove: true,
+    horzTouchDrag: true,
+    vertTouchDrag: false,
+  }},
+  handleScale: {{
+    axisPressedMouseMove: true,
+    mouseWheel: true,
+    pinch: true,
+  }},
+}});
+
+/* ── Candlestick ─────────────────────────────────────────── */
+const candle = chart.addCandlestickSeries({{
+  upColor:       '#C97870',
+  downColor:     '#6B9E8E',
+  borderVisible: false,
+  wickUpColor:   '#B85450',
+  wickDownColor: '#5A8A7A',
+}});
+candle.setData(CANDLES);
+
+/* ── Volume overlay (bottom 24 % of pane) ───────────────── */
+const vol = chart.addHistogramSeries({{
+  priceFormat: {{type: 'volume'}},
+  priceScaleId: 'vol',
+}});
+vol.priceScale().applyOptions({{
+  scaleMargins: {{top: 0.76, bottom: 0}},
+}});
+vol.setData(VOLUME);
+
+/* ── MA lines ────────────────────────────────────────────── */
+const addMA = (data, color, title) => {{
+  const s = chart.addLineSeries({{
+    color, lineWidth: 1.4, title,
+    crosshairMarkerVisible: false,
+    priceLineVisible: false,
+    lastValueVisible: true,
+  }});
+  s.setData(data);
+  return s;
+}};
+addMA(MA5,  '#B8966A', 'MA5');
+addMA(MA20, '#607D8B', 'MA20');
+addMA(MA60, '#7A9E87', 'MA60');
+
+/* ── Crosshair OHLC legend ───────────────────────────────── */
+const legend = document.getElementById('legend');
+chart.subscribeCrosshairMove(param => {{
+  if (!param.time || !param.seriesData.size) {{
+    legend.innerHTML = '';
+    return;
+  }}
+  const d = param.seriesData.get(candle);
+  if (!d) return;
+  const c = d.close >= d.open ? '#B85450' : '#5A8A7A';
+  legend.innerHTML =
+    '<span style="color:' + c + '">'
+    + 'O\u00a0' + d.open.toFixed(2)
+    + '\u00a0\u00a0H\u00a0' + d.high.toFixed(2)
+    + '\u00a0\u00a0L\u00a0' + d.low.toFixed(2)
+    + '\u00a0\u00a0C\u00a0' + d.close.toFixed(2)
+    + '</span>';
+}});
+</script></body></html>"""
+
+    components.html(html, height=472, scrolling=False)
 
 
 def chart_monte_carlo(mc: dict, cash: float) -> go.Figure:
@@ -962,12 +1153,35 @@ def render_daily_guide(guide: list[dict]) -> None:
     st.markdown("##### 詳細操作說明")
     for item in guide:
         bg, border, _ = _ACTION_STYLE.get(item['action'], ('rgba(158,158,158,0.07)', '#9E9E9E', '─'))
+
+        # ── 策略依據 badge + tag pills ─────────────────────────
+        reason  = item.get('strategy_reason', {})
+        pr      = reason.get('primary_reason', '')
+        tags    = reason.get('tags', [])
+        r_summ  = reason.get('summary', '')
+
+        _reason_html = ''
+        if pr and pr not in ('─', 'Data Limited', ''):
+            _badge = (
+                f'<span style="display:inline-block;background:#607D8B;color:#fff;'
+                f'border-radius:20px;padding:2px 10px;font-size:.72rem;font-weight:600;'
+                f'letter-spacing:.04em;margin-right:6px;">{pr}</span>'
+            )
+            _pills = ''.join(
+                f'<span style="display:inline-block;background:rgba(96,125,139,0.10);'
+                f'color:#607D8B;border:1px solid rgba(96,125,139,0.25);border-radius:12px;'
+                f'padding:1px 8px;font-size:.71rem;margin-right:4px;">{t}</span>'
+                for t in tags[:4]
+            )
+            _reason_html = f'<div style="margin-top:10px;line-height:2;">{_badge}{_pills}</div>'
+
         st.markdown(f"""
         <div style="background:{bg};border-left:4px solid {border};
                     border-radius:0 10px 10px 0;padding:14px 20px;margin:10px 0;">
           <div style="font-size:1.05rem;font-weight:700;color:#383838;margin-bottom:6px;">
             {item['icon']}&nbsp;&nbsp;{item['label']}</div>
           <div style="color:#5A5A5A;font-size:.9rem;line-height:1.6;">{item['summary']}</div>
+          {_reason_html}
         </div>""", unsafe_allow_html=True)
 
         if item.get('detail'):
@@ -981,6 +1195,16 @@ def render_daily_guide(guide: list[dict]) -> None:
                 if item['amount']:
                     c4.metric("涉及金額", f"NT${item['amount']:,.0f}")
                 st.markdown(item['detail'])
+
+                # 技術指標細節
+                sig_d = reason.get('signal_detail', {})
+                if sig_d:
+                    st.markdown("**技術指標數值**")
+                    sd_cols = st.columns(len(sig_d))
+                    for (k, v), col in zip(sig_d.items(), sd_cols):
+                        col.metric(k, f"{v:.1f}" if k == 'RSI' else f"{v:+.3f}")
+                    if r_summ:
+                        st.caption(f"📊 {r_summ}")
 
 
 # ── K 線模組（@st.fragment 隔離）──────────────────────────────
@@ -1022,7 +1246,7 @@ def _kline_body(available_codes: list[str], quotes: dict) -> None:
         st.warning(f"⚠️  無法取得 {code} 的數據。")
         return
 
-    st.plotly_chart(chart_kline(df, code), use_container_width=True)
+    render_kline_lwc(df, code)
 
     recent = df.tail(60)
     s1, s2, s3, s4 = st.columns(4)
@@ -1069,9 +1293,12 @@ def render_analysis_tabs(results: dict, config: dict) -> None:
             st.markdown("##### 評分明細")
             mode_tag = "⚡短線" if config.get('short_term_mode') else "🔵長線"
             st.caption(f"策略模式：{mode_tag}")
+            _sr_map = results.get('strategy_reasons', {})
             st.dataframe(pd.DataFrame([{
                 '#': i, '代號': c, '評分': f"{s:+.4f}",
                 '信號': "▲看多" if s > .10 else ("▼看空" if s < -.10 else "─中性"),
+                '策略依據': _sr_map.get(c, {}).get('primary_reason', '─'),
+                '信號標籤': '  '.join(_sr_map.get(c, {}).get('tags', [])[:3]),
                 '': "✅" if c in sc else "",
             } for i, (c, s) in enumerate(ss, 1)]),
                 use_container_width=True, hide_index=True,
@@ -1208,23 +1435,18 @@ def main() -> None:
         return
 
     username = st.session_state['_username']
-    config   = render_sidebar(username)
-    ch       = config['current_holdings']
-    pool     = config['target_pool']
-    cash     = config['available_cash']
 
-    # 即時報價（頁面載入即執行，與 GA 無關）
-    all_codes = tuple(sorted(set(list(ch.keys()) + pool)))
-    with st.spinner("⚡ 獲取即時報價..."):
-        quotes = fetch_realtime_quotes(all_codes)
-
-    # 標題列
-    col_h, col_r = st.columns([5, 1])
+    # ── 頁首：標題 + 刷新 + 登出 ──────────────────────────────
+    col_h, col_btns = st.columns([5, 1])
     with col_h:
+        # 從上次執行的 config 或 user_settings 讀取策略模式（供 badge 用）
+        _saved   = st.session_state.get('_user_settings', {})
+        _cfg     = st.session_state.get('_config', _saved)
+        _is_short = _cfg.get('short_term_mode', _saved.get('short_term_mode', True))
         badge = (
             "<span style='background:#B85450;color:#fff;border-radius:20px;"
             "font-size:.70rem;padding:2px 10px;margin-left:10px;letter-spacing:.04em;'>⚡ 短線</span>"
-            if config['short_term_mode'] else
+            if _is_short else
             "<span style='background:#607D8B;color:#fff;border-radius:20px;"
             "font-size:.70rem;padding:2px 10px;margin-left:10px;letter-spacing:.04em;'>● 長線</span>"
         )
@@ -1237,34 +1459,46 @@ def main() -> None:
             f"GA × Monte Carlo × Real-time Dashboard  ·  v4.0  ·  {username}</p>",
             unsafe_allow_html=True,
         )
-    with col_r:
+    with col_btns:
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("🔄 刷新報價"):
+        cb1, cb2 = st.columns(2)
+        if cb1.button("🔄", help="刷新報價"):
             fetch_realtime_quotes.clear()
             fetch_kline_data.clear()
+            st.rerun()
+        if cb2.button("登出"):
+            for k in ('_username', '_user_settings', '_results', '_config', '_has_results'):
+                st.session_state.pop(k, None)
             st.rerun()
 
     st.markdown("---")
 
-    if ch:
-        render_top_kpi_bar(compute_portfolio_summary(ch, quotes, cash))
-    else:
-        st.info("ℹ️  在左側輸入持股後，此處將顯示即時資產快報。")
+    # ── 主體三標籤 ────────────────────────────────────────────
+    tab_dash, tab_analysis, tab_settings = st.tabs(["📊 儀表板", "📈 分析", "⚙️ 設定"])
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    # 設定標籤優先執行（取得最新 config + run_clicked）
+    with tab_settings:
+        config, run_clicked = render_settings_tab(username)
 
-    if ch:
-        render_holdings_table(build_holdings_rows(ch, quotes))
+    ch   = config['current_holdings']
+    pool = config['target_pool']
+    cash = config['available_cash']
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    # 即時報價
+    all_codes = tuple(sorted(set(list(ch.keys()) + pool)))
+    quotes: dict = {}
+    if all_codes:
+        with st.spinner("⚡ 獲取即時報價..."):
+            quotes = fetch_realtime_quotes(all_codes)
 
-    # K 線（Fragment 隔離）
-    render_kline_section(list(dict.fromkeys(list(ch.keys()) + pool)), quotes)
+    with tab_dash:
+        render_dashboard_tab(config, quotes)
 
-    st.markdown("---")
+    with tab_analysis:
+        render_analysis_tab(config)
 
-    # 執行推演
-    if config['run_clicked']:
+    # ── 執行推演（在標籤外執行，進度條顯示於頁底）────────────
+    if run_clicked:
         if not pool:
             st.error("❌  請先設定候選股池。")
             return
@@ -1274,7 +1508,6 @@ def main() -> None:
         prog = st.progress(0)
         stat = st.empty()
 
-        # 思考鏈監控視窗
         st.markdown(
             "<div class='section-bar'>🧠 THINKING LOG  ─  AI 推理過程監控</div>",
             unsafe_allow_html=True,
@@ -1283,7 +1516,6 @@ def main() -> None:
         logger = ThinkingLogger(think_container)
 
         try:
-            # 下載歷史數據（帶快取）
             all_hist_codes = tuple(sorted(set(list(ch.keys()) + pool)))
             stock_data = fetch_pool_history(all_hist_codes)
 
@@ -1298,7 +1530,8 @@ def main() -> None:
                 '_results': results, '_config': config, '_has_results': True,
             })
             prog.empty(); stat.empty()
-            st.success("✅  分析完成！")
+            st.success("✅  分析完成！請切換至 📈 分析 頁籤查看結果。")
+            st.rerun()
 
         except Exception as e:
             prog.empty(); stat.empty()
@@ -1306,27 +1539,6 @@ def main() -> None:
             with st.expander("錯誤詳情"):
                 st.exception(e)
             return
-
-    # 結果展示
-    if st.session_state.get('_has_results'):
-        res = st.session_state['_results']
-        cfg = st.session_state.get('_config', config)
-
-        render_daily_guide(generate_daily_guide(
-            res['holdings_analysis'], res['stock_scores'],
-            cfg['current_holdings'], cfg['available_cash'], quotes,
-        ))
-        st.markdown("---")
-        render_analysis_tabs(res, cfg)
-    else:
-        st.markdown("""
-        <div style="text-align:center;padding:48px 0 32px;color:#9E9E9E;">
-          <div style="font-size:2.4rem;margin-bottom:14px;opacity:.55;">🧬</div>
-          <p style="color:#7A7A7A;font-size:.95rem;margin:0 0 6px;">
-            點擊左側 <b style="color:#607D8B;">🚀 執行推演</b> 啟動 GA 優化與蒙地卡羅模擬</p>
-          <p style="color:#AEAEAE;font-size:.80rem;margin:0;">
-            系統將自動依你的持倉與資金，產出個性化買入建議</p>
-        </div>""", unsafe_allow_html=True)
 
     st.markdown("---")
     st.caption("⚠️ 本系統僅供學術研究，不構成投資建議。過去績效不代表未來報酬。")

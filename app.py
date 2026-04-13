@@ -33,7 +33,7 @@ from engine import (
     TW_STOCK_UNIVERSE,
     TW_STOCK_NAMES,
 )
-from data_fetcher import DataFetcher
+from data_fetcher import DataFetcher, get_tw_daily_snapshot, fetch_with_funnel
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -445,9 +445,41 @@ def fetch_kline_data(code: str) -> pd.DataFrame | None:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_pool_history(codes: tuple[str, ...]) -> dict[str, pd.DataFrame]:
-    """下載股票池 1 年歷史數據（短線模式縮短週期），快取 1 小時。"""
-    fetcher = DataFetcher(period='1y')
+    """下載股票池 2 年歷史數據，快取 1 小時。作為漏斗失敗時的 fallback。"""
+    fetcher = DataFetcher(period='2y')
     return fetcher.fetch_multiple(list(codes))
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_funnel_pool(period: str = "2y") -> tuple[list[str], dict, dict]:
+    """
+    呼叫 TWSE/TPEx API 取得全市場快照，執行三階段漏斗篩選：
+      Stage 1 — 成交量 > 1,000 張
+      Stage 2 — 收盤價 > 5MA
+      Stage 3 — 一次性批次下載 {period} 完整歷史
+
+    快取 1 小時，同一交易日內不重複呼叫 API。
+
+    Returns
+    -------
+    (passed_codes, stock_data, selection_reasons)
+      passed_codes      : 通過兩關篩選的代號列表
+      stock_data        : {代號: OHLCV DataFrame}
+      selection_reasons : {代號: {'volume_lots', 'ma5_pct', 'reason_str', ...}}
+
+    若 API 失敗（非交易日 / 網路問題 / 盤中資料未就緒），
+    回傳空值以觸發 fallback。
+    """
+    try:
+        codes, snapshot_df = get_tw_daily_snapshot(verbose=False)
+        if not codes:
+            return [], {}, {}
+        stock_data, selection_reasons = fetch_with_funnel(
+            snapshot_df, period=period, verbose=False
+        )
+        return list(stock_data.keys()), stock_data, selection_reasons
+    except Exception:
+        return [], {}, {}
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -561,18 +593,31 @@ def render_settings_tab(username: str) -> tuple[dict, bool]:
 
     # ── 候選股池 ──────────────────────────────────────────────
     st.markdown('<div class="section-bar">🎯 候選股池</div>', unsafe_allow_html=True)
-    auto_pool = generate_asset_driven_pool(available_cash, current_holdings)
+    # 嘗試漏斗 API，失敗時 fallback 到硬編碼池
+    funnel_codes, _funnel_data, _funnel_reasons = fetch_funnel_pool()
+    if funnel_codes:
+        auto_pool = (
+            list(current_holdings.keys())
+            + [c for c in funnel_codes if c not in current_holdings]
+        )[:50]
+        _auto_pool_source = "市場漏斗"
+    else:
+        auto_pool = generate_asset_driven_pool(available_cash, current_holdings)
+        _auto_pool_source = "資產導向"
+
     pool_mode = st.radio(
         "pool_mode", ["🤖 資產導向（自動）", "✏️ 手動輸入"],
         index=0, label_visibility='collapsed', horizontal=True,
     )
     if pool_mode == "🤖 資產導向（自動）":
         target_pool = auto_pool
+        _src_badge = "🌐 全市場漏斗篩選" if _auto_pool_source == "市場漏斗" else "📋 資產導向（API 未就緒）"
         st.caption(
-            f"依持倉結構自動推薦 {len(target_pool)} 支：\n"
+            f"{_src_badge}，共 {len(target_pool)} 支候選：\n"
             f"`{'、'.join(target_pool[:6])}{'…' if len(target_pool) > 6 else ''}`"
         )
         if st.button("🔄 重新生成", key="regen_pool"):
+            st.cache_data.clear()
             st.rerun()
     else:
         saved_pool_str = ','.join(saved.get('target_pool', auto_pool))
@@ -1520,15 +1565,31 @@ def main() -> None:
         logger = ThinkingLogger(think_container)
 
         try:
-            all_hist_codes = tuple(sorted(set(list(ch.keys()) + pool)))
-            stock_data = fetch_pool_history(all_hist_codes)
+            # 嘗試複用漏斗快取的已下載數據（避免重複下載）
+            _, funnel_stock_data, funnel_reasons = fetch_funnel_pool()
+            if funnel_stock_data:
+                # 補下載漏斗未覆蓋的持股（若有）
+                missing_codes = tuple(
+                    c for c in ch.keys() if c not in funnel_stock_data
+                )
+                holdings_extra = fetch_pool_history(missing_codes) if missing_codes else {}
+                stock_data = {**funnel_stock_data, **holdings_extra}
+                # 以實際下載成功的代號作為分析股池
+                analysis_pool = [c for c in pool if c in stock_data]
+            else:
+                # Fallback：下載用戶指定的股池
+                all_hist_codes = tuple(sorted(set(list(ch.keys()) + pool)))
+                stock_data = fetch_pool_history(all_hist_codes)
+                funnel_reasons = {}
+                analysis_pool = pool
 
             results = run_full_pipeline(
-                cash, ch, pool, stock_data,
+                cash, ch, analysis_pool, stock_data,
                 config['ga_config'], config['mc_config'], config['top_n'],
                 config['short_term_mode'],
                 prog, stat,
                 thinking_logger=logger,
+                funnel_reasons=funnel_reasons,
             )
             st.session_state.update({
                 '_results': results, '_config': config, '_has_results': True,

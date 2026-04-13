@@ -628,6 +628,81 @@ def build_strategy_reason(
 
 
 # ═══════════════════════════════════════════════════════════════
+#  選股篩選依據計算
+# ═══════════════════════════════════════════════════════════════
+
+def compute_selection_reasons(
+    stock_data: dict[str, pd.DataFrame],
+    funnel_reasons: dict[str, dict] | None = None,
+) -> dict[str, dict]:
+    """
+    為每支股票計算「篩選依據」資料，提供透明的選股說明。
+
+    對每支已下載的股票計算：
+      - avg_volume_lots : 近 5 日平均成交量（張）
+      - ma5_pct         : 收盤價偏離 5MA 的百分比（正值 = 高於均線）
+      - close           : 最新收盤價
+      - ma5             : 最新 5MA
+
+    若有漏斗快照資料（funnel_reasons），優先使用快照中的成交量數字；
+    否則從下載的 Volume 欄位自行計算。
+
+    Parameters
+    ----------
+    stock_data     : {代號: OHLCV DataFrame}
+    funnel_reasons : fetch_with_funnel() 回傳的篩選元數據（可為 None）
+
+    Returns
+    -------
+    dict：{代號: {'avg_volume_lots', 'ma5_pct', 'close', 'ma5', 'reason_str'}}
+      reason_str 為供 UI 直接顯示的中文摘要，例如：
+      "成交量 5,200 張  均線↑1.2%"
+    """
+    reasons: dict[str, dict] = {}
+
+    for code, df in stock_data.items():
+        try:
+            close_ser = df['Close'].dropna()
+            vol_ser   = df['Volume'].dropna() if 'Volume' in df.columns else pd.Series(dtype=float)
+
+            if len(close_ser) < 5:
+                continue
+
+            latest_close = float(close_ser.iloc[-1])
+            ma5_val      = float(close_ser.rolling(5).mean().iloc[-1])
+            ma5_pct      = (latest_close - ma5_val) / ma5_val * 100.0 if ma5_val > 0 else 0.0
+
+            # 成交量：優先用漏斗快照（當日精確值），其次用 5 日均量
+            if funnel_reasons and code in funnel_reasons:
+                avg_vol_lots = funnel_reasons[code].get('volume_lots', 0)
+            elif len(vol_ser) >= 5:
+                avg_vol_lots = int(vol_ser.iloc[-5:].mean() / 1_000)
+            else:
+                avg_vol_lots = 0
+
+            trend = "↑" if ma5_pct >= 0 else "↓"
+            reason_str = f"量 {avg_vol_lots:,}張  均線{trend}{abs(ma5_pct):.1f}%"
+
+            reasons[code] = {
+                'avg_volume_lots': avg_vol_lots,
+                'ma5_pct':         round(ma5_pct, 2),
+                'close':           round(latest_close, 1),
+                'ma5':             round(ma5_val, 1),
+                'reason_str':      reason_str,
+            }
+        except Exception:
+            reasons[code] = {
+                'avg_volume_lots': 0,
+                'ma5_pct':         0.0,
+                'close':           0.0,
+                'ma5':             0.0,
+                'reason_str':      "─",
+            }
+
+    return reasons
+
+
+# ═══════════════════════════════════════════════════════════════
 #  完整量化分析 Pipeline
 # ═══════════════════════════════════════════════════════════════
 
@@ -643,6 +718,7 @@ def run_full_pipeline(
         _prog,                      # st.progress 物件
         _stat,                      # st.empty 物件
         thinking_logger: ThinkingLogger | None = None,
+        funnel_reasons: dict | None = None,   # fetch_with_funnel() 回傳的篩選元數據
 ) -> dict:
     """
     執行完整量化分析流程：GA → MC → 持股分析。
@@ -751,6 +827,11 @@ def run_full_pipeline(
                     "primary_reason": "─", "tags": [], "signal_detail": {}, "summary": "",
                 }
     results['strategy_reasons'] = strategy_reasons
+
+    # ── 選股篩選依據（量能 + MA5 偏差）──────────────────────────
+    _think("計算各股量能與均線偏差，生成篩選透明度標籤...", 'data')
+    selection_reasons = compute_selection_reasons(pool_data, funnel_reasons)
+    results['selection_reasons'] = selection_reasons
     _prog.progress(65)
 
     # ── Step 3：蒙地卡羅模擬 ─────────────────────────────────

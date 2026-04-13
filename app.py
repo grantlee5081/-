@@ -1293,13 +1293,17 @@ def render_analysis_tabs(results: dict, config: dict) -> None:
             st.markdown("##### 評分明細")
             mode_tag = "⚡短線" if config.get('short_term_mode') else "🔵長線"
             st.caption(f"策略模式：{mode_tag}")
-            _sr_map = results.get('strategy_reasons', {})
+            _sr_map  = results.get('strategy_reasons', {})
+            _sel_map = results.get('selection_reasons', {})
             st.dataframe(pd.DataFrame([{
-                '#': i, '代號': c, '評分': f"{s:+.4f}",
-                '信號': "▲看多" if s > .10 else ("▼看空" if s < -.10 else "─中性"),
+                '#':      i,
+                '代號':   c,
+                '評分':   f"{s:+.4f}",
+                '信號':   "▲看多" if s > .10 else ("▼看空" if s < -.10 else "─中性"),
+                '篩選依據': _sel_map.get(c, {}).get('reason_str', '─'),
                 '策略依據': _sr_map.get(c, {}).get('primary_reason', '─'),
                 '信號標籤': '  '.join(_sr_map.get(c, {}).get('tags', [])[:3]),
-                '': "✅" if c in sc else "",
+                '':       "✅" if c in sc else "",
             } for i, (c, s) in enumerate(ss, 1)]),
                 use_container_width=True, hide_index=True,
                 height=min(420, len(ss)*38+40))

@@ -48,6 +48,7 @@ import random
 import numpy as np
 import pandas as pd
 from dataclasses import dataclass, field
+from joblib import Parallel, delayed
 
 from technical_factors import TechnicalFactors
 from performance_metrics import PerformanceMetrics
@@ -230,22 +231,47 @@ class GeneticAlgorithm:
         )
         return PerformanceMetrics.fitness_score(strategy_ret)
 
+    def _eval_one_individual(
+        self,
+        genes: np.ndarray,
+        stock_data: dict[str, pd.DataFrame],
+    ) -> float:
+        """
+        計算單一個體的跨股票平均適應度。
+        拆分為獨立函數以供 joblib 並行呼叫。
+        """
+        params = self.decode(genes)
+        total, count = 0.0, 0
+        for code, df in stock_data.items():
+            if 'Close' not in df.columns:
+                continue
+            prices = df['Close'].dropna()
+            f = self._backtest_one(prices, params)
+            if f > -999.0:
+                total += f
+                count += 1
+        return total / count if count > 0 else -1.0
+
     def _evaluate_population(self,
                               population: list[Individual],
                               stock_data: dict[str, pd.DataFrame]) -> None:
-        """評估種群中每個個體的適應度（跨股票平均）。"""
-        for ind in population:
-            params = self.decode(ind.genes)
-            total, count = 0.0, 0
-            for code, df in stock_data.items():
-                if 'Close' not in df.columns:
-                    continue
-                prices = df['Close'].dropna()
-                f = self._backtest_one(prices, params)
-                if f > -999.0:
-                    total += f
-                    count += 1
-            ind.fitness = total / count if count > 0 else -1.0
+        """
+        並行評估種群中每個個體的適應度。
+
+        使用 joblib.Parallel(n_jobs=-1, prefer='threads') 確保：
+          - 充分利用多核心 CPU
+          - 在 Windows + Streamlit 環境下不會因 multiprocessing spawn 崩潰
+          - prefer='threads' 使用執行緒後端，避免 pickle 與 __main__ 衛兵問題
+        """
+        fitnesses: list[float] = Parallel(
+            n_jobs=-1,
+            prefer='threads',
+        )(
+            delayed(self._eval_one_individual)(ind.genes, stock_data)
+            for ind in population
+        )
+        for ind, fit in zip(population, fitnesses):
+            ind.fitness = fit
 
     # ── 遺傳算子 ──────────────────────────────────────────────
 
